@@ -1,0 +1,11 @@
+# SwiftPM / 构建产物
+.build/
+build/
+
+# macOS
+.DS_Store
+*.swp
+
+# Xcode（如日后用）
+*.xcuserstate
+xcuserdata/
