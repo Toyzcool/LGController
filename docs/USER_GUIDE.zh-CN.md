@@ -23,8 +23,8 @@ English version: [USER_GUIDE.en.md](USER_GUIDE.en.md) · 适用版本：1.0.0（
 
 **运行要求一览**
 
-- macOS 13.0 或更高。只有菜单栏图标，没有 Dock 图标，也没有主窗口。
-- **Apple Silicon Mac**：所有用到 DDC 的功能（LG 亮度、LG 扬声器音量、输入源切换）都需要它，DDC/CI 只通过 Apple Silicon 上的 IOAVService 实现。在其他 Mac 上，非苹果外接屏没有 DDC 通道，其卡片显示「亮度不可控」。
+- macOS 12.0 或更高。只有菜单栏图标，没有 Dock 图标，也没有主窗口。
+- **Apple Silicon 或 Intel Mac**：用到 DDC 的功能（LG 亮度、LG 扬声器音量、输入源切换），在 Apple Silicon 上通过 IOAVService 实现，在 Intel Mac 上通过显卡帧缓冲的 I²C 总线实现（**Intel 为试验性支持**，尚未在真机上充分验证）。匹配不到 DDC 通道的外接屏，其卡片显示「亮度不可控」。
 - 没有预编译安装包，需要用 `./build.sh` 从源码构建，这需要 Xcode Command Line Tools（见第二部分第 2 节）。
 - 「辅助功能」权限只有亮度/音量/静音键需要；其他功能（包括 `⌘⇧1`～`⌘⇧4`）都不需要。
 
@@ -205,8 +205,8 @@ English version: [USER_GUIDE.en.md](USER_GUIDE.en.md) · 适用版本：1.0.0（
 
 ### 1. 系统要求
 
-- **Mac**：Apple Silicon。DDC 控制只为 Apple Silicon 实现；没有它就没有 LG 亮度、LG 扬声器音量和输入源切换。`build.sh` 只为运行它的这台 Mac 的架构构建。
-- **macOS**：13.0 或更高。
+- **Mac**：Apple Silicon 或 Intel。Intel 上的 DDC（LG 亮度、扬声器音量、输入源切换）为试验性支持。`build.sh` 只为运行它的这台 Mac 的架构构建。
+- **macOS**：12.0 或更高。
 - **构建工具**：Xcode Command Line Tools，Swift 5.7 及以上（Command Line Tools 14.1 或更新）。不需要完整的 Xcode。
 - **源码**：GitHub 仓库 `Toyzcool/LGController`。
 - **显示器**：输入源切换需要 LG 显示器，且取决于型号/固件（见第 10 节）。亮度和扬声器音量也适用于其他支持 DDC/CI 的显示器。
@@ -342,7 +342,8 @@ open /Applications/LGController.app
 
 - 全新安装首次启动时会自动开启开机自启动。如果这台 Mac 上以前的 LGController 已经保存过亮度记录（偏好设置里有 `brightness-*`），视为升级，不会自动开启。
 - 首次启动之后，App 从不自行更改这个设置。你可以用弹窗里的「开机自启动」开关、`--login-item on|off`，或 **系统设置 → 通用 → 登录项** 来更改。
-- 如果系统要求批准，到 **系统设置 → 通用 → 登录项** 中打开 LGController。
+- 如果系统要求批准（macOS 13 起），到 **系统设置 → 通用 → 登录项** 中打开 LGController。
+- **macOS 12**：系统没有新的登录项接口，App 改为通过「系统事件」添加传统登录项。第一次开启时会弹出「“LGController”想要控制“系统事件”」，点「好」；之后它出现在 **系统偏好设置 → 用户与群组 → 登录项** 里。
 - 也可以在终端查看（必须从 App 包内的可执行文件运行；把 `status` 换成 `on` 或 `off` 即可开启或关闭，见第 7 节）：
 
   ```bash
@@ -477,9 +478,9 @@ open /Applications/LGController.app
 
 ### 9. 故障排查
 
-**构建时报错 `is using Swift tools version 5.7.0 but the installed version is …`**
+**构建时报错 `is using Swift tools version 5.7.0 but the installed version is …`，或 `no such module 'PackageDescription'`**
 
-- 原因：这台 Mac 的命令行工具太旧，Swift 低于 5.7（早于 Command Line Tools 14.1）。已经装过时，`xcode-select --install` 只会提示已安装，不会升级。
+- 原因：这台 Mac 的命令行工具太旧（Swift 低于 5.7，早于 Command Line Tools 14.1），或者装坏了——编译器和系统 SDK 版本对不上，常见于升级系统之后（此时报错前还会有一句 `did not find a prebuilt standard library … compatible with this Swift compiler`）。已经装过时，`xcode-select --install` 只会提示已安装，不会修复。
 - 解决：先用 `xcode-select -p` 看当前用的是哪套工具。如果是 `/Library/Developer/CommandLineTools`，删掉后重装，系统会装上适合这台 Mac 的最新版（需要输入密码）：
 
   ```bash
@@ -490,7 +491,7 @@ open /Applications/LGController.app
   xcode-select --install
   ```
 
-  装完用 `swift --version` 确认，再运行 `./build.sh`。如果输出的是 `/Applications/Xcode.app/…`，则在 App Store 更新 Xcode。LGController 本身需要 macOS 13 或更高才能运行。
+  装完用 `swift --version` 确认，再运行 `./build.sh`。如果输出的是 `/Applications/Xcode.app/…`，则在 App Store 更新 Xcode。LGController 本身需要 macOS 12 或更高才能运行。
 
 **媒体键（亮度/音量/静音）没有反应，或由 macOS 处理**
 
@@ -499,7 +500,7 @@ open /Applications/LGController.app
 | 媒体键全部由 macOS 处理，弹窗里有橙色提示 | 未授予辅助功能权限 | 点击「启用键盘快捷键需授予辅助功能权限…」，按第 3 节授权 |
 | 辅助功能开关是开的，但媒体键仍由 macOS 处理 | 用 ad-hoc 签名重新构建过，授权已不适用；或 App 是从 iCloud 云盘里的项目目录运行的，而不是 `/Applications` | 在辅助功能列表里移除 LGController 再重新添加，或运行 `tccutil reset Accessibility com.toyzcool.LGController`，从 `/Applications/LGController.app` 重新启动并授权；想避免每次重建都要这样做，按第 2 节创建自签名证书 |
 | 显示器休眠时、或刚唤醒 / 刚插拔显示器后短时间内，按键由 macOS 处理 | 显示器休眠期间按键处理暂停；唤醒或显示器变化后约 1.5 秒内，App 重新连接显示器之前也暂停 | 稍等再按 |
-| 只有某块屏的亮度键不起作用，该屏卡片显示「亮度不可控」 | App 没有为这台屏匹配到 DDC 通道（例如不是 Apple Silicon Mac），或 DisplayServices 不可用，亮度键交给了 macOS | 确认是 Apple Silicon Mac；插拔或唤醒后等重建完成再试；或把鼠标移到可控的屏上 |
+| 只有某块屏的亮度键不起作用，该屏卡片显示「亮度不可控」 | App 没有为这台屏匹配到 DDC 通道（例如 Intel Mac 上找不到它的帧缓冲 I²C 总线），或 DisplayServices 不可用，亮度键交给了 macOS | 插拔或唤醒后等重建完成再试；或把鼠标移到可控的屏上。诊断日志里的 `DDC 通道` 一行写明了匹配结果 |
 | 带着修饰键按时 App 不响应 | 同时按着 `⌘`、`⌃` 或单独的 `⌥`，这些组合会原样交给 macOS | 不加修饰键，或只用 `⇧` / `⌥⇧` |
 | 音量键浮层显示带斜线的圆形扬声器 | 当前输出设备音量不可调 | 见下一条「音量卡片显示不可调」 |
 | 按键行为与 LGController 不一致（步进、浮层不同），或 LGController 似乎不响应 | 迁移前的旧 App（见第 8 节）或其他拦截媒体键的工具（如 MonitorControl）仍在运行，先拦截了按键 | 退出它并移除其登录项，见第 8 节 |
@@ -531,6 +532,11 @@ open /Applications/LGController.app
   - 如果打开弹窗后仍不对，说明显示器不应答读取，日志中会出现 `回读(弹窗) 音量 … → 失败`。用弹窗滑杆重新设一次（亮度用显示器卡片里的滑杆；音量用「音量」卡片，需该显示器是当前输出，或接了多台 DDC 显示器时用显示器卡片里的扬声器滑杆）：App 会把显示器设为滑杆的值，双方重新一致。
   - 内建屏和苹果显示器会在每次按亮度键前自动重读，一般不会出现这个问题。
 
+**macOS 12 上「开机自启动」开关打不开或不生效**
+
+- 原因：没有允许 LGController 控制「系统事件」（第一次开启时的弹窗点了「不允许」，或没有弹出）。
+- 解决：打开 **系统偏好设置 → 安全性与隐私 → 隐私 → 自动化**，勾选 LGController 下面的「系统事件」，再点一次弹窗里的开关。
+
 **`⌘⇧3` / `⌘⇧4` 截了图，或截图快捷键不再起作用**
 
 - 原因：`⌘⇧3` 和 `⌘⇧4` 同时也是 macOS 截图快捷键，哪一方都可能抢先响应。App 的快捷键写死在代码里，无法修改；快捷键注册失败时 App 也不会提示（只写入系统日志）。
@@ -554,6 +560,8 @@ open /Applications/LGController.app
 
 | 日志内容 | 含义 |
 |---|---|
+| `DDC 通道 <名称>[id] → IOAVService` / `IOFramebuffer I²C` / `未匹配…` | 启动和每次显示器变化时，这台外接屏用哪种通道控制（Apple Silicon / Intel），或没找到通道 |
+| `Intel 帧缓冲 显示器N → …` | Intel Mac 上为显示器找帧缓冲的方式（CGSServiceForDisplayNumber 或 EDID 属性匹配），或没找到 |
 | `输入源 请求 <输入源>（0x..） 路线=DDC屏「<名称>」` | 收到请求，命令将发给显示器 `<名称>` |
 | `… 路线=兜底` | 列表里没有可 DDC 的外接屏，走兜底（所有外接端点） |
 | `输入源 入队 → <名称> code=0x..` | 命令已排入这台显示器的 DDC 队列 |
@@ -569,7 +577,7 @@ open /Applications/LGController.app
 
 ### 10. 已知限制
 
-- **DDC 只支持 Apple Silicon**。在其他 Mac 上没有 LG 亮度、LG 扬声器音量和输入源切换；`build.sh` 只为本机架构构建。
+- **Intel Mac 为试验性支持**：DDC 经显卡帧缓冲的 I²C 总线收发，只认系统显示器列表里的屏，已从列表中消失的显示器无法从 Mac 切回；兜底盲发也只发给列表里的外接屏。`build.sh` 只为本机架构构建。
 - **输入源切换**：
   - 使用 LG 私有寄存器 `0xF4`，只写不可读，只能看显示器画面确认结果；按钮也不会显示当前输入源。
   - 只在 LG 显示器上验证过（代码注释为 LG 27UP / UltraFine 系列），且 LG 按型号/固件开放该命令；EDID 为 `GSM 0x7707` 的 LG HDR 4K 确认收到但不切换。

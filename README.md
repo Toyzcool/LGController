@@ -7,6 +7,8 @@
 
 **功能说明与使用手册**：[中文](docs/USER_GUIDE.zh-CN.md) · [English](docs/USER_GUIDE.en.md)
 
+**系统要求**：macOS 12 或更高；Apple Silicon 或 Intel Mac（Intel 上的 DDC——LG 亮度、扬声器音量、输入源切换——为试验性支持）。
+
 > 从 Monitoring 或 SourceShift 换过来：请先退出它们并在「系统设置 → 通用 → 登录项」里移除，
 > 否则会和 LGController 同时响应媒体键与 `⌘⇧1~4`（重复调节 / 重复发送命令）。
 
@@ -47,7 +49,7 @@
 
 | 目标 | 通道 |
 |---|---|
-| LG UltraFine（DP 连接）亮度 | DDC/CI `VCP 0x10`（IOAVService I2C） |
+| LG UltraFine（DP 连接）亮度 | DDC/CI `VCP 0x10`（Apple Silicon：IOAVService I²C；Intel：IOFramebuffer I²C） |
 | 音量/静音（任意屏按键） | CoreAudio 系统默认输出设备（耳机/AirPods/内建扬声器/USB 显示器音频）；到 0 时 `kAudioDevicePropertyMute` 真静音 |
 | LG UltraFine 扬声器（作为输出源时 / 弹窗音量卡片） | DDC/CI `VCP 0x62`（DP 音频无法由 CoreAudio 调节，回退 DDC） |
 | 内建屏亮度 | 私有 `DisplayServices` 框架 |
@@ -90,7 +92,7 @@ Sources/LGController/
 ├── AppDelegate.swift     组装 + 重配置/睡眠守护
 ├── DisplayManager.swift  枚举、分类（苹果协议 vs DDC）、鼠标定位
 ├── Display.swift         显示器模型（AppleProtocolDisplay / DDCDisplay）
-├── DDC.swift             Arm64 DDC/CI I2C + AVService↔DisplayID 匹配打分
+├── DDC.swift             DDC/CI 两种通道：Apple Silicon（IOAVService）/ Intel（IOFramebuffer I²C）+ 显示器匹配
 ├── SmoothRamp.swift      平滑调节引擎（指数趋近，慢通道自动降频）
 ├── MediaKeyTap.swift     CGEventTap 媒体键拦截
 ├── InputSource.swift     输入源切换：InputSource / InputSwitcher / ⌘⇧1~4 热键（合并自 SourceShift）
@@ -100,6 +102,7 @@ Sources/LGController/
 ├── AudioVolume.swift     CoreAudio 有状态音量（内部意图值步进，精确归零+真静音）
 ├── OSD.swift             自绘 HUD 浮层（macOS 26 系统样式）
 ├── PrivateAPI.swift      dlsym 桥接私有符号
+├── LaunchAtLogin.swift   开机自启动：macOS 13+ 用 SMAppService，macOS 12 经「系统事件」管理登录项
 ├── DiagLog.swift         诊断日志 ~/Library/Logs/LGController/diag.log（输入源发送、DDC 回读）
 ├── StatusMenu.swift      菜单栏弹窗 UI（NSPopover 承载 SwiftUI，含视图模型 PopoverModel）
 ├── Preview.swift         `--uipreview` 离屏渲染弹窗 UI 到 /tmp（核对样式用）

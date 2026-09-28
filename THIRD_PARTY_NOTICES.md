@@ -12,8 +12,10 @@ LGController 包含源自下列项目的代码；按其许可证要求，在此�
 - Used in / 使用位置：
   - `Sources/LGController/DDC.swift` — DDC/CI read and write over IOAVService, and matching AVService endpoints to displays; ported and simplified from MonitorControl's `Arm64DDC.swift`.
     DDC/CI 读写（IOAVService I²C）与 AVService 端点↔显示器匹配，移植并精简自 MonitorControl 的 `Arm64DDC.swift`。
-  - `Sources/LGController/PrivateAPI.swift` — declarations of the private IOAVService functions used by that code.
-    上述代码用到的 IOAVService 私有函数声明。
+  - `Sources/LGController/DDC.swift`（`IntelI2C`）— on Intel Macs, DDC/CI over the IOFramebuffer I²C bus and matching framebuffers to displays; ported and simplified from MonitorControl's `IntelDDC.swift`, which MonitorControl notes is adapted from @reitermarkus's IntelDDC.swift.
+    Intel Mac 上经 IOFramebuffer I²C 总线的 DDC/CI 收发，以及帧缓冲↔显示器匹配，移植并精简自 MonitorControl 的 `IntelDDC.swift`（MonitorControl 注明其改编自 @reitermarkus 的 IntelDDC.swift）。
+  - `Sources/LGController/PrivateAPI.swift` — declarations of the private IOAVService and CGSServiceForDisplayNumber functions used by that code.
+    上述代码用到的 IOAVService、CGSServiceForDisplayNumber 私有函数声明。
   - `Sources/LGController/DisplayManager.swift` — detecting Apple-protocol displays through DisplayServices follows MonitorControl's approach.
     通过 DisplayServices 判定苹果协议显示器的规则，沿用 MonitorControl 的做法。
 

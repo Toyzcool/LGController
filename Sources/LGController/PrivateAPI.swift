@@ -1,6 +1,7 @@
 //  PrivateAPI.swift
 //  私有框架符号桥接：DisplayServices（内建屏/苹果协议屏亮度）、IOAVService（Apple Silicon DDC I2C）、
-//  CoreDisplay（显示器信息字典）。全部通过 dlsym 动态解析，避免链接私有 .tbd。
+//  CGSServiceForDisplayNumber（Intel：显示器 → IOFramebuffer）、CoreDisplay（显示器信息字典）。
+//  全部通过 dlsym 动态解析，避免链接私有 .tbd。
 
 import CoreGraphics
 import Darwin
@@ -63,6 +64,16 @@ enum PrivateAPI {
     static let ioAVServiceReadI2C: IOAVI2CFn? =
         symbol("IOAVServiceReadI2C", frameworks: ioavFrameworks)
             .map { unsafeBitCast($0, to: IOAVI2CFn.self) }
+
+    // MARK: CoreGraphics 私有函数（Intel Mac：CGDirectDisplayID → IOFramebuffer）
+
+    /// `void CGSServiceForDisplayNumber(CGDirectDisplayID, io_service_t *)`，返回的端口由调用方释放。
+    typealias CGSServiceForDisplayNumberFn = @convention(c) (CGDirectDisplayID, UnsafeMutablePointer<io_service_t>) -> Void
+
+    static let cgsServiceForDisplayNumber: CGSServiceForDisplayNumberFn? =
+        symbol("CGSServiceForDisplayNumber",
+               frameworks: ["/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics"])
+            .map { unsafeBitCast($0, to: CGSServiceForDisplayNumberFn.self) }
 
     // MARK: CoreDisplay
 

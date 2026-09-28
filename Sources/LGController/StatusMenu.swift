@@ -7,6 +7,7 @@
 //  → 「输入源」（合并自 SourceShift：Type C / DP / HDMI1 / HDMI2，对应 ⌘⇧1~4）。
 
 import AppKit
+import Combine
 import CoreAudio
 import ServiceManagement
 import SwiftUI
@@ -100,7 +101,7 @@ final class PopoverModel: ObservableObject {
         }
         volumeControl?.syncFromHardware()
         accessibilityGranted = AXIsProcessTrusted()
-        launchAtLogin = SMAppService.mainApp.status == .enabled
+        launchAtLogin = LaunchAtLogin.isEnabled
         reload(includingOutputs: true)
     }
 
@@ -207,15 +208,11 @@ final class PopoverModel: ObservableObject {
 
     func toggleLaunchAtLogin() {
         do {
-            if SMAppService.mainApp.status == .enabled {
-                try SMAppService.mainApp.unregister()
-            } else {
-                try SMAppService.mainApp.register()
-            }
+            try LaunchAtLogin.setEnabled(!LaunchAtLogin.isEnabled)
         } catch {
             NSLog("LGController: 切换开机自启动失败: \(error.localizedDescription)")
         }
-        launchAtLogin = SMAppService.mainApp.status == .enabled
+        launchAtLogin = LaunchAtLogin.isEnabled
     }
 
     func openAccessibilitySettings() {
@@ -565,6 +562,7 @@ final class StatusMenuController: NSObject, NSPopoverDelegate {
     private let statusItem: NSStatusItem
     private let model: PopoverModel
     private let popover = NSPopover()
+    private var contentSizeObserver: AnyCancellable?
 
     init(displayManager: DisplayManager, inputSwitcher: InputSwitcher, volumeControl: VolumeControl) {
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -586,9 +584,27 @@ final class StatusMenuController: NSObject, NSPopoverDelegate {
         // sizingOptions 会据 SwiftUI 内容自适应高度（宽度保持 300）。
         popover.contentSize = NSSize(width: 300, height: 520)
         let hosting = NSHostingController(rootView: MenuView(model: model))
-        hosting.sizingOptions = [.preferredContentSize]
+        if #available(macOS 13.0, *) {
+            hosting.sizingOptions = [.preferredContentSize]
+        } else {
+            // macOS 12 没有 sizingOptions：内容变化（如插拔耳机多出一个输出源按钮）后重新按内容定高度
+            contentSizeObserver = model.objectWillChange.sink { [weak self] _ in
+                DispatchQueue.main.async { [weak self] in
+                    guard let self = self, self.popover.isShown else { return }
+                    self.fitPopoverToContent()
+                }
+            }
+        }
         popover.contentViewController = hosting
         popover.delegate = self
+    }
+
+    /// macOS 12：按 SwiftUI 内容的理想高度设置弹窗大小（宽度固定 300）。
+    private func fitPopoverToContent() {
+        guard let view = popover.contentViewController?.view else { return }
+        view.layoutSubtreeIfNeeded()
+        let height = view.fittingSize.height
+        if height > 0 { popover.contentSize = NSSize(width: 300, height: height) }
     }
 
     @objc private func togglePopover(_ sender: Any?) {
@@ -598,6 +614,7 @@ final class StatusMenuController: NSObject, NSPopoverDelegate {
             return
         }
         model.refresh()
+        if #unavailable(macOS 13.0) { fitPopoverToContent() }
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         // 让弹窗窗口成为 key，滑块等控件才能接收拖动事件（accessory 应用尤其需要）
         popover.contentViewController?.view.window?.makeKey()

@@ -1,32 +1,31 @@
 //  main.swift — LGController 入口（菜单栏应用，无 Dock 图标）
 
 import AppKit
-import ServiceManagement
 
-/// `--login-item on|off|status`：命令行开关开机自启动（与弹窗里的开关同一个 SMAppService.mainApp）。
+/// `--login-item on|off|status`：命令行开关开机自启动（与弹窗里的开关同一套实现，见 LaunchAtLogin）。
 /// 须从 /Applications/LGController.app 包内的可执行文件运行，系统按 App 包识别登录项。
 func runLoginItemCommand(_ action: String) -> Never {
-    let service = SMAppService.mainApp
     do {
         switch action {
-        case "on": if service.status != .enabled { try service.register() }
-        case "off": if service.status == .enabled { try service.unregister() }
+        case "on": try LaunchAtLogin.setEnabled(true)
+        case "off": try LaunchAtLogin.setEnabled(false)
         default: break
         }
     } catch {
         print("开机自启动 \(action) 失败：\(error.localizedDescription)")
         exit(1)
     }
+    let status = LaunchAtLogin.status
     let state: String
-    switch service.status {
+    switch status {
     case .enabled: state = "已开启"
     case .notRegistered: state = "未开启"
     case .requiresApproval: state = "待批准（系统设置 → 通用 → 登录项 里打开 LGController）"
     case .notFound: state = "找不到 App（须从 /Applications/LGController.app 内运行）"
-    @unknown default: state = "未知"
+    case .unknown: state = "未知"
     }
     print("开机自启动：\(state)")
-    exit(action == "on" && service.status != .enabled ? 1 : 0)
+    exit(action == "on" && status != .enabled ? 1 : 0)
 }
 
 if let i = CommandLine.arguments.firstIndex(of: "--login-item") {

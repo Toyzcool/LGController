@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "LGController",
-    platforms: [.macOS(.v13)],
+    platforms: [.macOS(.v12)],
     targets: [
         .executableTarget(
             name: "LGController",

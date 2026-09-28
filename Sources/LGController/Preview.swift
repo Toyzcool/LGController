@@ -6,7 +6,23 @@ import AppKit
 import SwiftUI
 
 func runUIPreview() -> Never {
-    MainActor.assumeIsolated { // 程序启动时本就在主线程，ImageRenderer 需主 actor
+    guard #available(macOS 13.0, *) else {
+        print("--uipreview 需要 macOS 13 或更高（用到 ImageRenderer）")
+        exit(1)
+    }
+    // ImageRenderer 须在主 actor 上用。不用 MainActor.assumeIsolated（Swift 5.9 才有）：
+    // 投递一个主 actor 任务，再用 dispatchMain() 让主线程开始处理主队列。
+    Task { @MainActor in
+        renderPreviews()
+        exit(0)
+    }
+    dispatchMain()
+}
+
+@available(macOS 13.0, *)
+@MainActor
+private func renderPreviews() {
+    do {
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
 
@@ -44,5 +60,4 @@ func runUIPreview() -> Never {
             }
         }
     }
-    exit(0)
 }

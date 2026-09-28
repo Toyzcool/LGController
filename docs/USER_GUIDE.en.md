@@ -23,8 +23,8 @@ LGController is a macOS menu-bar app for controlling your displays and sound fro
 
 **Requirements at a glance**
 
-- macOS 13.0 or later. The app lives in the menu bar only; it has no Dock icon and no main window.
-- **An Apple Silicon Mac** for everything that uses DDC: LG brightness, LG speaker volume and input switching. DDC/CI is implemented only through IOAVService on Apple Silicon. On other Macs, non-Apple external displays get no DDC channel and their card shows 「亮度不可控」 (Brightness not controllable).
+- macOS 12.0 or later. The app lives in the menu bar only; it has no Dock icon and no main window.
+- **An Apple Silicon or Intel Mac.** Everything that uses DDC (LG brightness, LG speaker volume, input switching) goes through IOAVService on Apple Silicon, and through the graphics card's framebuffer I²C bus on Intel Macs (**Intel support is experimental** and not yet well tested on real hardware). An external display with no DDC channel shows 「亮度不可控」 (Brightness not controllable) on its card.
 - There is no prebuilt download. You build the app from source with `./build.sh`, which needs the Xcode Command Line Tools (see Part 2, [section 2](#2-build--install)).
 - Accessibility permission is needed only for the brightness, volume and mute keys. Everything else, including ⌘⇧1–4, works without it.
 
@@ -205,8 +205,8 @@ From top to bottom:
 
 ### 1. Requirements
 
-- **Mac:** Apple Silicon. DDC control is implemented only for Apple Silicon; without it there is no LG brightness, LG speaker volume or input switching. `build.sh` builds for the architecture of the Mac you run it on.
-- **macOS:** 13.0 or later.
+- **Mac:** Apple Silicon or Intel. DDC on Intel (LG brightness, speaker volume, input switching) is experimental. `build.sh` builds for the architecture of the Mac you run it on.
+- **macOS:** 12.0 or later.
 - **Build tools:** Xcode Command Line Tools with Swift 5.7 or later (Command Line Tools 14.1 or newer). The full Xcode app isn't needed.
 - **Source:** the GitHub repository `Toyzcool/LGController`.
 - **Monitor:** an LG monitor for input switching, and it depends on the model and firmware (see [section 10](#10-known-limitations)). Brightness and speaker volume also work with other monitors that support DDC/CI.
@@ -342,7 +342,8 @@ Without the permission, everything else still works: all popover sliders and til
 
 - On a fresh install, launch at login is turned on automatically at first launch. It isn't turned on if an earlier LGController already saved brightness values on this Mac (`brightness-*` entries in its preferences); that counts as an upgrade.
 - After first launch the app never changes this setting on its own. You change it with the 「开机自启动」 (Launch at login) switch, with `--login-item on|off`, or in System Settings → General → Login Items.
-- If macOS requires approval, turn on LGController in System Settings → General → Login Items.
+- If macOS requires approval (macOS 13 and later), turn on LGController in System Settings → General → Login Items.
+- **macOS 12:** there is no modern login-item API, so the app adds a classic login item through System Events. The first time you turn it on, macOS asks whether "LGController" may control "System Events"; click OK. The item then appears in System Preferences → Users & Groups → Login Items.
 - You can also check it from Terminal (it must be run from the executable inside the app bundle; replace `status` with `on` or `off` to turn it on or off, see [section 7](#7-command-line-options)):
 
   ```bash
@@ -477,10 +478,10 @@ What changes:
 
 ### 9. Troubleshooting
 
-**The build fails with `is using Swift tools version 5.7.0 but the installed version is …`**
+**The build fails with `is using Swift tools version 5.7.0 but the installed version is …`, or with `no such module 'PackageDescription'`**
 
-- Cause: the Command Line Tools on this Mac are too old: Swift is below 5.7 (older than Command Line Tools 14.1). If they're already installed, `xcode-select --install` only says so and doesn't upgrade them.
-- Fix: run `xcode-select -p` to see which tools are in use. If it prints `/Library/Developer/CommandLineTools`, delete them and reinstall; macOS installs the newest version for this Mac (you'll be asked for your password):
+- *Cause:* the Command Line Tools on this Mac are too old (Swift below 5.7, older than Command Line Tools 14.1), or they're broken: the compiler and the macOS SDK don't match, which often happens after a system upgrade (the error is then preceded by `did not find a prebuilt standard library … compatible with this Swift compiler`). If they're already installed, `xcode-select --install` only says so and doesn't repair them.
+- *Fix:* run `xcode-select -p` to see which tools are in use. If it prints `/Library/Developer/CommandLineTools`, delete them and reinstall; macOS installs the newest version for this Mac (you'll be asked for your password):
 
   ```bash
   sudo rm -rf /Library/Developer/CommandLineTools
@@ -490,7 +491,7 @@ What changes:
   xcode-select --install
   ```
 
-  Check the result with `swift --version`, then run `./build.sh`. If it prints `/Applications/Xcode.app/…`, update Xcode from the App Store instead. LGController itself needs macOS 13 or later to run.
+  Check the result with `swift --version`, then run `./build.sh`. If it prints `/Applications/Xcode.app/…`, update Xcode from the App Store instead. LGController itself needs macOS 12 or later to run.
 
 **Media keys (brightness / volume / mute) do nothing, or macOS handles them instead**
 
@@ -499,7 +500,7 @@ What changes:
 | macOS handles all media keys, and the popover shows the orange warning | Accessibility permission is missing | Click 「启用键盘快捷键需授予辅助功能权限…」 and grant it as in [section 3](#3-first-launch) |
 | The Accessibility switch is on, but macOS still handles the media keys | The app was rebuilt with ad-hoc signing, so the permission no longer applies; or the app was run from the project folder in iCloud Drive instead of `/Applications` | Remove LGController from the Accessibility list and add it again, or run `tccutil reset Accessibility com.toyzcool.LGController`, relaunch `/Applications/LGController.app` and grant again. To stop this happening on every rebuild, set up the self-signed certificate ([section 2](#2-build--install)) |
 | macOS handles the keys while the displays are asleep, or for a moment right after wake or plugging in a display | Key handling is paused while the displays are asleep, and for about 1.5 s after wake or a display change, until the app has reconnected to the monitors | Wait a moment and press again |
-| Only one display's brightness keys don't work, and its card shows 「亮度不可控」 (Brightness not controllable) | The app matched no DDC channel for that display (for example on a Mac without Apple Silicon), or DisplayServices isn't available, so the brightness keys went to macOS | Make sure it's an Apple Silicon Mac; after plugging in or waking, wait for the rebuild to finish and try again; or move the pointer to a display that can be controlled |
+| Only one display's brightness keys don't work, and its card shows 「亮度不可控」 (Brightness not controllable) | The app matched no DDC channel for that display (for example, on an Intel Mac no framebuffer I²C bus was found for it), or DisplayServices isn't available, so the brightness keys went to macOS | After plugging in or waking, wait for the rebuild to finish and try again, or move the pointer to a display that can be controlled. The `DDC 通道` line in the diagnostic log shows the match result |
 | The app doesn't respond when a modifier is held | ⌘, ⌃ or ⌥ on its own is held; those combinations go to macOS unchanged | Use no modifier, ⇧, or ⌥⇧ |
 | The volume HUD shows a crossed-out speaker in a circle | The current output's volume can't be adjusted | See the next entry, "The Volume card says …" |
 | The keys behave differently from LGController (different steps or HUD), or LGController seems not to respond | An app you used before LGController (see [section 8](#8-migrating-from-monitoring--sourceshift)) or another media-key tool (such as MonitorControl) is still running and takes the keys first | Quit it and remove its login item, see [section 8](#8-migrating-from-monitoring--sourceshift) |
@@ -531,6 +532,11 @@ What changes:
   - If it's still wrong after opening the popover, the monitor isn't answering reads, and the log shows `回读(弹窗) 音量 … → 失败` (read-back (popover) volume … → failed). Drag the popover slider once (for brightness, the slider in the display card; for volume, the Volume card while that monitor is the current output, or with several DDC monitors the speaker slider in its display card): that sets the monitor to the slider's value and brings the two back in line.
   - Built-in and Apple displays are re-read automatically before every brightness key press, so this normally doesn't happen with them.
 
+**On macOS 12 the 「开机自启动」 (Launch at login) switch won't turn on or has no effect**
+
+- *Cause:* LGController isn't allowed to control System Events (you clicked "Don't Allow" at the first prompt, or no prompt appeared).
+- *Fix:* open System Preferences → Security & Privacy → Privacy → Automation, tick "System Events" under LGController, then click the switch in the popover again.
+
 **⌘⇧3 / ⌘⇧4 take screenshots, or screenshots stopped working**
 
 - *Cause:* ⌘⇧3 and ⌘⇧4 are also the macOS screenshot shortcuts, and either one can take them over. The app's shortcuts are fixed in the code and can't be changed. If a shortcut couldn't be registered, the app doesn't tell you (it's only written to the system log).
@@ -554,6 +560,8 @@ What changes:
 
 | Message | Meaning |
 |---|---|
+| `DDC 通道 <name>[id] → IOAVService` / `IOFramebuffer I²C` / `未匹配…` | At launch and after every display change: which channel controls this external monitor (Apple Silicon / Intel), or that none was found |
+| `Intel 帧缓冲 显示器N → …` | On an Intel Mac: how the monitor's framebuffer was found (CGSServiceForDisplayNumber or EDID property matching), or that none was found |
 | `输入源 请求 <input>（0x..） 路线=DDC屏「<name>」` | Request received; the command will go to monitor `<name>` |
 | `… 路线=兜底` | No DDC external monitor in the list; using the fallback (all external endpoints) |
 | `输入源 入队 → <name> code=0x..` | The command was queued on that monitor's DDC queue |
@@ -569,7 +577,7 @@ What changes:
 
 ### 10. Known limitations
 
-- **Apple Silicon only for DDC.** On other Macs there is no LG brightness, LG speaker volume or input switching; `build.sh` builds only for the Mac's own architecture.
+- **Intel Macs are experimental.** DDC goes through the graphics card's framebuffer I²C bus and only works for displays in the system's display list; a display that has dropped out of the list can't be switched back from the Mac, and the blind fallback also only reaches listed external displays. `build.sh` builds only for the Mac's own architecture.
 - **Input switching:**
   - It uses LG's private register `0xF4`, which can only be written, not read. The monitor's screen is the only confirmation, and the tiles can't show the current input.
   - It has only been verified on LG monitors (the code notes the LG 27UP / UltraFine series), and LG enables it per model and firmware; the LG HDR 4K with EDID `GSM 0x7707` acknowledges the command but doesn't switch.

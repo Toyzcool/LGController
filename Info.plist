@@ -23,7 +23,9 @@
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>LSMinimumSystemVersion</key>
-	<string>13.0</string>
+	<string>12.0</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>在 macOS 12 上通过「系统事件」把 LGController 加入登录项，实现开机自启动。</string>
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSHumanReadableCopyright</key>

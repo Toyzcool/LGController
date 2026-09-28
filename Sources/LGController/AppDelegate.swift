@@ -66,9 +66,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard !defaults.bool(forKey: key) else { return }
         let isUpgrade = defaults.dictionaryRepresentation().keys.contains { $0.hasPrefix("brightness-") }
         defaults.set(true, forKey: key)
-        guard !isUpgrade, SMAppService.mainApp.status != .enabled else { return }
+        guard !isUpgrade, !LaunchAtLogin.isEnabled else { return }
         do {
-            try SMAppService.mainApp.register()
+            try LaunchAtLogin.setEnabled(true)
         } catch {
             NSLog("LGController: 首次启动开启开机自启动失败: \(error.localizedDescription)")
         }

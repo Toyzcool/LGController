@@ -112,7 +112,8 @@ func runSelfTest() -> Never {
     pumpRunLoop(seconds: 0.3)
     for display in manager.displays {
         let kind = display is DDCDisplay ? "DDC" : "Apple/内建"
-        print("显示器: \(display.name) [id=\(display.id)] 类型=\(kind) 亮度可控=\(display.canBrightness) 音量可控=\(display.canVolume)")
+        let channel = (display as? DDCDisplay)?.ddc.map { " 通道=\($0.transportName)" } ?? ""
+        print("显示器: \(display.name) [id=\(display.id)] 类型=\(kind)\(channel) 亮度可控=\(display.canBrightness) 音量可控=\(display.canVolume)")
     }
 
     for display in manager.displays where display.canBrightness {
@@ -389,6 +390,24 @@ func runSelfTest() -> Never {
     let vol30OK = vol30 == [0x84, 0x03, 0x62, 0x00, 0x1E, 0xC4]
     print("   组包 标准VCP 音量30 @0x51: \(vol30.map { String(format: "%02X", $0) }.joined(separator: " ")) \(vol30OK ? "✅" : "❌")")
     if !vol30OK { failures += 1 }
+    // Intel 通道的包 = [源地址] + 写包，须与 SourceShift 的 Intel 路径逐字节一致：
+    // [0x50, 0x84, 0x03, 码, 值高, 值低, 校验]，校验 = 0x6E ^ 前 6 字节
+    var intelOK = true
+    for source in InputSource.allCases {
+        let packet = DDCService.writePacket(code: InputSource.lgVCP, value: source.lgCode,
+                                            dataAddress: DDCService.lgInputDataAddress)
+        let got = DDCService.framebufferPacket(packet, dataAddress: DDCService.lgInputDataAddress)
+        var expected: [UInt8] = [0x50, 0x84, 0x03, InputSource.lgVCP,
+                                 UInt8(source.lgCode >> 8), UInt8(source.lgCode & 0xFF), 0]
+        expected[6] = expected[0 ... 5].reduce(UInt8(0x6E), ^)
+        if got != expected { intelOK = false }
+    }
+    print("   组包 Intel 通道（[源地址]+写包）×4 与 SourceShift Intel 路径一致 \(intelOK ? "✅" : "❌")")
+    if !intelOK { failures += 1 }
+    // 位置路径里的单元号（Intel 区分同型号显示器用）
+    let unit = IntelI2C.unitNumber(inLocation: "IOService:/AppleACPIPlatformExpert/PCI0@0/AppleACPIPCI/IGPU@2/AppleIntelFramebuffer@1/display0/AppleDisplay-1e6d-7707")
+    print("   Intel 单元号解析: \(unit.map(String.init) ?? "nil")（期望 1）\(unit == 1 ? "✅" : "❌")")
+    if unit != 1 { failures += 1 }
 
     // ② 快捷键：注册 ⌘⇧1~4，并把合成的 Carbon 热键事件投递给应用事件目标，验证分发到正确输入源
     var dispatched: [InputSource] = []

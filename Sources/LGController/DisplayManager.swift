@@ -34,9 +34,13 @@ final class DisplayManager {
 
         let services = DDCServiceMatcher.match(displayIDs: ddcCandidateIDs)
         for id in ddcCandidateIDs {
-            newDisplays.append(DDCDisplay(id: id, name: Self.displayName(id), ddc: services[id]))
-            if services[id] == nil {
-                NSLog("LGController: 显示器 \(Self.displayName(id)) 未匹配到 DDC 通道")
+            let name = Self.displayName(id)
+            newDisplays.append(DDCDisplay(id: id, name: name, ddc: services[id]))
+            if let service = services[id] {
+                DiagLog.write("DDC 通道 \(name)[\(id)] → \(service.transportName)")
+            } else {
+                NSLog("LGController: 显示器 \(name) 未匹配到 DDC 通道")
+                DiagLog.write("DDC 通道 \(name)[\(id)] → 未匹配（亮度/音量/输入源不可控）")
             }
         }
 
