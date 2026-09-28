@@ -207,7 +207,7 @@ English version: [USER_GUIDE.en.md](USER_GUIDE.en.md) · 适用版本：1.0.0（
 
 - **Mac**：Apple Silicon。DDC 控制只为 Apple Silicon 实现；没有它就没有 LG 亮度、LG 扬声器音量和输入源切换。`build.sh` 只为运行它的这台 Mac 的架构构建。
 - **macOS**：13.0 或更高。
-- **构建工具**：Xcode Command Line Tools，Swift 5.9 及以上。不需要完整的 Xcode。
+- **构建工具**：Xcode Command Line Tools，Swift 5.7 及以上（Command Line Tools 14.1 或更新）。不需要完整的 Xcode。
 - **源码**：GitHub 仓库 `Toyzcool/LGController`。
 - **显示器**：输入源切换需要 LG 显示器，且取决于型号/固件（见第 10 节）。亮度和扬声器音量也适用于其他支持 DDC/CI 的显示器。
 - **权限**：辅助功能，仅亮度/音量/静音键需要。
@@ -222,7 +222,7 @@ English version: [USER_GUIDE.en.md](USER_GUIDE.en.md) · 适用版本：1.0.0（
    xcode-select --install
    ```
 
-   然后确认 Swift 版本（需 5.9 及以上）：
+   然后确认 Swift 版本（需 5.7 及以上）：
 
    ```bash
    swift --version
@@ -476,6 +476,21 @@ open /Applications/LGController.app
 - 输入源快捷键与 SourceShift 相同，发送的字节和时序也相同（例如 Type C = `84 03 F4 00 D1 9C`，数据地址 `0x50`）；找不到外接端点时的最后兜底（系统默认 AVService）就是 SourceShift 原来唯一的发送路径。
 
 ### 9. 故障排查
+
+**构建时报错 `is using Swift tools version 5.7.0 but the installed version is …`**
+
+- 原因：这台 Mac 的命令行工具太旧，Swift 低于 5.7（早于 Command Line Tools 14.1）。已经装过时，`xcode-select --install` 只会提示已安装，不会升级。
+- 解决：先用 `xcode-select -p` 看当前用的是哪套工具。如果是 `/Library/Developer/CommandLineTools`，删掉后重装，系统会装上适合这台 Mac 的最新版（需要输入密码）：
+
+  ```bash
+  sudo rm -rf /Library/Developer/CommandLineTools
+  ```
+
+  ```bash
+  xcode-select --install
+  ```
+
+  装完用 `swift --version` 确认，再运行 `./build.sh`。如果输出的是 `/Applications/Xcode.app/…`，则在 App Store 更新 Xcode。LGController 本身需要 macOS 13 或更高才能运行。
 
 **媒体键（亮度/音量/静音）没有反应，或由 macOS 处理**
 

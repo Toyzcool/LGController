@@ -110,7 +110,7 @@ final class PopoverModel: ObservableObject {
         guard let manager else { return }
         let volumeDisplays = Set(manager.displays.compactMap { ($0 as? DDCDisplay)?.canVolume == true ? $0.id : nil })
         var cardTargetID: CGDirectDisplayID?
-        if case .ddc(let d) = volumeControl?.outputTarget() { cardTargetID = d.id }
+        if let volumeControl, case .ddc(let d) = volumeControl.outputTarget() { cardTargetID = d.id }
         displays = manager.displays.map { display in
             var row = DisplayRow(id: display.id, name: display.name,
                                  canBrightness: display.canBrightness, brightness: Double(display.brightness))
@@ -333,6 +333,16 @@ private struct VolumeCard: View {
         model.outputs.first { $0.id == model.selectedOutput }?.name ?? "无输出设备"
     }
 
+    // 标题与提示文案单独算好再交给 Text：长的三元/插值表达式会拖慢旧版编译器（Swift 5.7）的类型检查
+    private var headerTitle: String {
+        model.level.viaDDC ? "\(currentName) · DDC" : currentName
+    }
+
+    private var unavailableHint: String {
+        let perDisplay = model.outputAmbiguousDisplay && model.displays.contains(where: { $0.showVolume })
+        return perDisplay ? "请在上方显示器卡片中调节扬声器音量" : "该输出设备不支持调节音量"
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
@@ -340,7 +350,7 @@ private struct VolumeCard: View {
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 4)
-                Text(model.level.viaDDC ? "\(currentName) · DDC" : currentName)
+                Text(headerTitle)
                     .font(.system(size: 11))
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
@@ -352,8 +362,7 @@ private struct VolumeCard: View {
                            value: Binding(get: { Double(model.level.volume) },
                                           set: { model.setOutputVolume($0) }))
             } else {
-                Text(model.outputAmbiguousDisplay && model.displays.contains { $0.showVolume }
-                     ? "请在上方显示器卡片中调节扬声器音量" : "该输出设备不支持调节音量")
+                Text(unavailableHint)
                     .font(.caption)
                     .foregroundStyle(.tertiary)
             }

@@ -207,7 +207,7 @@ From top to bottom:
 
 - **Mac:** Apple Silicon. DDC control is implemented only for Apple Silicon; without it there is no LG brightness, LG speaker volume or input switching. `build.sh` builds for the architecture of the Mac you run it on.
 - **macOS:** 13.0 or later.
-- **Build tools:** Xcode Command Line Tools with Swift 5.9 or later. The full Xcode app isn't needed.
+- **Build tools:** Xcode Command Line Tools with Swift 5.7 or later (Command Line Tools 14.1 or newer). The full Xcode app isn't needed.
 - **Source:** the GitHub repository `Toyzcool/LGController`.
 - **Monitor:** an LG monitor for input switching, and it depends on the model and firmware (see [section 10](#10-known-limitations)). Brightness and speaker volume also work with other monitors that support DDC/CI.
 - **Permission:** Accessibility, for the brightness, volume and mute keys only.
@@ -222,7 +222,7 @@ There is no prebuilt app. Build it once, and again whenever you update the sourc
    xcode-select --install
    ```
 
-   Then check the Swift version (5.9 or later is needed):
+   Then check the Swift version (5.7 or later is needed):
 
    ```bash
    swift --version
@@ -476,6 +476,21 @@ What changes:
 - The input shortcuts are the same as SourceShift's and send the same bytes with the same timing (for example Type C = `84 03 F4 00 D1 9C` at data address `0x50`). The last fallback when no external endpoint is found (the system's default AVService) is the only path SourceShift used.
 
 ### 9. Troubleshooting
+
+**The build fails with `is using Swift tools version 5.7.0 but the installed version is …`**
+
+- Cause: the Command Line Tools on this Mac are too old: Swift is below 5.7 (older than Command Line Tools 14.1). If they're already installed, `xcode-select --install` only says so and doesn't upgrade them.
+- Fix: run `xcode-select -p` to see which tools are in use. If it prints `/Library/Developer/CommandLineTools`, delete them and reinstall; macOS installs the newest version for this Mac (you'll be asked for your password):
+
+  ```bash
+  sudo rm -rf /Library/Developer/CommandLineTools
+  ```
+
+  ```bash
+  xcode-select --install
+  ```
+
+  Check the result with `swift --version`, then run `./build.sh`. If it prints `/Applications/Xcode.app/…`, update Xcode from the App Store instead. LGController itself needs macOS 13 or later to run.
 
 **Media keys (brightness / volume / mute) do nothing, or macOS handles them instead**
 

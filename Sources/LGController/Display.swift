@@ -177,6 +177,21 @@ final class AppleProtocolDisplay: Display {
 /// - 音量从 0 加上去只要 > 0 就自动解除静音，且仍是 +1（0 → 1）。
 /// 硬件写入顺序关键——实测 LG：**音量为 0 时写 0x8D=2 会被忽略**，故解除静音必须
 /// 「先写非零音量、再写 0x8D=2」；两者在同一串行队列上紧邻执行，不会被其他写入插队。
+// 诊断日志用的小工具：把回读结果格式化成文字。单独成函数，免得长插值表达式拖慢旧版编译器（Swift 5.7）的类型检查。
+private func readText(_ read: (current: UInt16, max: UInt16)?) -> String {
+    guard let read = read else { return "失败" }
+    return "\(read.current)/\(read.max)"
+}
+
+private func muteText(_ value: UInt16?) -> String {
+    guard let value = value else { return "失败" }
+    return String(value)
+}
+
+private func elapsedMS(since start: Date) -> Int {
+    Int(Date().timeIntervalSince(start) * 1000)
+}
+
 final class DDCDisplay: Display {
     /// 连续 DDC 写入之间的最小间距（实测 LG 写得太密会丢包，尤其音量后紧跟静音）。
     private static let writeSpacingUS: UInt32 = 50_000
@@ -240,7 +255,7 @@ final class DDCDisplay: Display {
             let brightnessRead = ddc.read(.brightness)
             let volumeRead = ddc.read(.volume)
             let muteRead = ddc.read(.mute)?.current
-            DiagLog.write("回读(启动校准) 亮度 → \(brightnessRead.map { "\($0.current)/\($0.max)" } ?? "失败") 音量 → \(volumeRead.map { "\($0.current)/\($0.max)" } ?? "失败") 静音 → \(muteRead.map(String.init) ?? "失败") 用时\(Int(Date().timeIntervalSince(t0) * 1000))ms")
+            DiagLog.write("回读(启动校准) 亮度 → \(readText(brightnessRead)) 音量 → \(readText(volumeRead)) 静音 → \(muteText(muteRead)) 用时\(elapsedMS(since: t0))ms")
             guard let self = self else { return }
             if let m = muteRead { self.lastWrittenMute = (m == 1) } // 记录硬件现状，供后续判断是否需要写 0x8D
             DispatchQueue.main.async {
@@ -292,7 +307,7 @@ final class DDCDisplay: Display {
         queue.async { [weak self] in
             let t0 = Date()
             let result = ddc.read(.brightness)
-            DiagLog.write("回读(弹窗) 亮度 \(name) → \(result.map { "\($0.current)/\($0.max)" } ?? "失败") 用时\(Int(Date().timeIntervalSince(t0) * 1000))ms")
+            DiagLog.write("回读(弹窗) 亮度 \(name) → \(readText(result)) 用时\(elapsedMS(since: t0))ms")
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.brightnessRefreshInFlight = false
@@ -318,7 +333,7 @@ final class DDCDisplay: Display {
             let t0 = Date()
             let result = ddc.read(.volume)
             let muteRead = ddc.read(.mute)?.current
-            DiagLog.write("回读(弹窗) 音量 \(name) → \(result.map { "\($0.current)/\($0.max)" } ?? "失败") 静音 → \(muteRead.map(String.init) ?? "失败") 用时\(Int(Date().timeIntervalSince(t0) * 1000))ms")
+            DiagLog.write("回读(弹窗) 音量 \(name) → \(readText(result)) 静音 → \(muteText(muteRead)) 用时\(elapsedMS(since: t0))ms")
             guard let self = self else { return }
             if let m = muteRead { self.lastWrittenMute = (m == 1) }
             DispatchQueue.main.async {
