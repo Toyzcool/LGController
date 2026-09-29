@@ -26,6 +26,8 @@ final class MediaKeyTap {
 
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
+    /// 诊断：本次启动已记下的「收到但不处理」的系统按键事件条数（只在主线程访问）。
+    private var unhandledLogged = 0
 
     @discardableResult
     func start() -> Bool {
@@ -72,9 +74,13 @@ final class MediaKeyTap {
             return Unmanaged.passUnretained(event)
         }
         guard type.rawValue == 14, // NX_SYSDEFINED
-              let nsEvent = NSEvent(cgEvent: event),
-              nsEvent.subtype.rawValue == 8 // NX_SUBTYPE_AUX_CONTROL_BUTTONS
-        else {
+              let nsEvent = NSEvent(cgEvent: event) else {
+            return Unmanaged.passUnretained(event)
+        }
+        let subtype = nsEvent.subtype.rawValue
+        guard subtype == 8 else { // NX_SUBTYPE_AUX_CONTROL_BUTTONS
+            // subtype 7 是鼠标按键（每次点击都有），不记；其余记下来，排查「按键没到 App」用
+            if subtype != 7 { logUnhandled("系统事件 subtype=\(subtype)（不是媒体键，放行）") }
             return Unmanaged.passUnretained(event)
         }
 
@@ -85,9 +91,17 @@ final class MediaKeyTap {
         let isRepeat = (keyFlags & 0x1) == 1
 
         guard let key = MediaKey(nxKeyType: keyCode) else {
+            if pressed { logUnhandled("系统按键 类型码=\(keyCode)（不是亮度/音量/静音，放行）") }
             return Unmanaged.passUnretained(event)
         }
         let consumed = handler?(key, pressed, isRepeat, nsEvent.modifierFlags) ?? false
         return consumed ? nil : Unmanaged.passUnretained(event)
+    }
+
+    /// 诊断日志：收到但不处理的系统按键事件（每次启动最多记 50 条，避免刷屏）。
+    private func logUnhandled(_ message: String) {
+        guard unhandledLogged < 50 else { return }
+        unhandledLogged += 1
+        DiagLog.write(message)
     }
 }

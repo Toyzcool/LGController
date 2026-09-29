@@ -564,6 +564,7 @@ What changes:
 |---|---|
 | `媒体键监听已启动（辅助功能已授权）` / `辅助功能未授权：…` | The media-key listener's state at launch; when Accessibility isn't granted, the brightness, volume and mute keys all go to macOS |
 | `媒体键 <key> 鼠标所在屏=「<name>」 → 已处理` / `交还 macOS` | One line per press of a brightness, volume or mute key: which key, which display handled it, and for brightness keys the resulting brightness. If you pressed a key and no line appears, the key never reached the app |
+| `系统按键 类型码=N（不是亮度/音量/静音，放行）` / `系统事件 subtype=N …` | A system key event arrived but it isn't one the app handles (for example keyboard backlight or play), so it goes to macOS unchanged. At most 50 per launch. If pressing an external keyboard's brightness key produces neither this line nor a 「媒体键」 line, that key doesn't send a system media-key event (typically because the vendor's software handles the key itself, or the keyboard sends brightness as an ordinary key such as F14/F15) |
 | `DDC 通道 <name>[id] → IOAVService` / `IOFramebuffer I²C` / `未匹配…` | At launch and after every display change: which channel controls this external monitor (Apple Silicon / Intel), or that none was found |
 | `Intel 帧缓冲 显示器N → …` | On an Intel Mac: how the monitor's framebuffer was found (CGSServiceForDisplayNumber or EDID property matching), or that none was found |
 | `输入源 请求 <input>（0x..） 路线=DDC屏「<name>」` | Request received; the command will go to monitor `<name>` |
