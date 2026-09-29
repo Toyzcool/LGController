@@ -1,6 +1,6 @@
 #!/bin/zsh
 # 构建并安装 LGController.app
-#   SPM 编译 → 手工组装 bundle → 清扩展属性 → 签名 → 安装到 /Applications
+#   编译（SwiftPM，不可用时改用 swiftc）→ 手工组装 bundle → 清扩展属性 → 签名 → 安装到 /Applications
 #
 # 为什么装到 /Applications：本工程位于 iCloud 云盘目录，直接从这里运行会带 iCloud/Finder
 # 扩展属性、且路径可能被系统重定位，导致「辅助功能」授权失效（开关是绿的但实际没生效）。
@@ -12,13 +12,29 @@
 set -e
 cd "$(dirname "$0")"
 
-echo "▸ swift build -c release"
-swift build -c release
+# 编译：优先用 SwiftPM（swift build）。SwiftPM 不能用时（常见于命令行工具升级不完整——
+# 编译 Package.swift 报 no such module 'PackageDescription'），改用 swiftc 直接编译全部源码：
+# 本项目只有一个模块、没有任何依赖，两种方式产物相同。设 LGC_USE_SWIFTC=1 可强制走 swiftc。
+BIN=".build/release/LGController"
+if [ -z "$LGC_USE_SWIFTC" ] && swift package describe >/dev/null 2>&1; then
+  echo "▸ swift build -c release"
+  swift build -c release
+else
+  if [ -z "$LGC_USE_SWIFTC" ]; then
+    echo "▸ SwiftPM 不可用（Package.swift 编译失败），改用 swiftc 直接编译"
+  fi
+  BIN=".build/swiftc/LGController"
+  mkdir -p "$(dirname "$BIN")"
+  TARGET="$(uname -m)-apple-macos12.0" # 与 Package.swift 的最低系统一致；只编本机架构
+  echo "▸ swiftc -O -target $TARGET（首次可能要几分钟：编译器要先为本机重建系统模块缓存）"
+  swiftc -O -wmo -swift-version 5 -module-name LGController -target "$TARGET" \
+    Sources/LGController/*.swift -o "$BIN"
+fi
 
 APP="build/LGController.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp .build/release/LGController "$APP/Contents/MacOS/LGController"
+cp "$BIN" "$APP/Contents/MacOS/LGController"
 cp Info.plist "$APP/Contents/Info.plist"
 
 # App 图标（emoji 生成，见 makeicon.swift）。缺失则现场生成一个默认的

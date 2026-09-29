@@ -247,7 +247,7 @@ There is no prebuilt app. Build it once, and again whenever you update the sourc
    ```
 
    The script:
-   1. runs `swift build -c release`;
+   1. compiles with `swift build -c release`; if SwiftPM can't be used (for example after an incomplete Command Line Tools update, which shows as `no such module 'PackageDescription'`), it compiles with `swiftc` directly instead and puts the binary in `.build/swiftc/`;
    2. assembles `build/LGController.app` (it generates the app icon from ☀️ if `Resources/AppIcon.icns` is missing);
    3. clears extended attributes and code-signs the app;
    4. quits any running LGController (it asks with `osascript` first, then uses `pkill`);
@@ -441,7 +441,7 @@ Run these in Terminal. Each option does its job and exits without starting the m
 | `.build/release/LGController --osdtest` | Shows the HUD demo on every screen in turn | Brightness 5/16, volume 50%, then muted, about 2.7 s per screen. Prints 「HUD 演示 → <screen name> [id=N]」 (HUD demo → <screen name>). Changes nothing and doesn't demo the input-source HUD |
 | `.build/release/LGController --uipreview` | Renders the popover from sample data | Writes `/tmp/menu_preview_light.png` and `/tmp/menu_preview_dark.png` at 2× and prints 「已渲染 light: …」 (Rendered light: …) or 「渲染失败 (light)」 (Rendering failed) for each (likewise for dark) |
 
-- Run the `.build/release/…` commands from the repository folder after `./build.sh` or `swift build -c release`.
+- Run the `.build/release/…` commands from the repository folder after `./build.sh` or `swift build -c release`. When `build.sh` compiled with `swiftc`, the binary is `.build/swiftc/LGController`; you can also use `/Applications/LGController.app/Contents/MacOS/LGController`.
 
 **`--login-item` output:** 「开机自启动：<state>」 (Launch at login: <state>), where the state is one of:
 
@@ -481,6 +481,7 @@ What changes:
 **The build fails with `is using Swift tools version 5.7.0 but the installed version is …`, or with `no such module 'PackageDescription'`**
 
 - *Cause:* the Command Line Tools on this Mac are too old (Swift below 5.7, older than Command Line Tools 14.1), or they're broken: the compiler and the macOS SDK don't match, which often happens after a system upgrade (the error is then preceded by `did not find a prebuilt standard library … compatible with this Swift compiler`). If they're already installed, `xcode-select --install` only says so and doesn't repair them.
+- With `./build.sh`, `no such module 'PackageDescription'` usually needs no action: the script falls back to compiling with `swiftc` directly (it prints 「SwiftPM 不可用（Package.swift 编译失败），改用 swiftc 直接编译」, "SwiftPM unavailable, compiling with swiftc"), which can take a few minutes the first time. You only need the fix below if the error is about the tools version, if `swiftc` fails too, or if you want to use `swift build` directly.
 - *Fix:* run `xcode-select -p` to see which tools are in use. If it prints `/Library/Developer/CommandLineTools`, delete them and reinstall; macOS installs the newest version for this Mac (you'll be asked for your password):
 
   ```bash

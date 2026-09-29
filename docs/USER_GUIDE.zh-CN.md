@@ -247,7 +247,7 @@ English version: [USER_GUIDE.en.md](USER_GUIDE.en.md) · 适用版本：1.0.0（
    ```
 
    脚本依次：
-   1. 运行 `swift build -c release`；
+   1. 编译：优先用 `swift build -c release`；SwiftPM 不能用时（例如命令行工具升级不完整，报 `no such module 'PackageDescription'`），自动改用 `swiftc` 直接编译，可执行文件放在 `.build/swiftc/`；
    2. 组装 `build/LGController.app`（缺少 `Resources/AppIcon.icns` 时用 ☀️ 生成图标）；
    3. 清除扩展属性并签名；
    4. 退出正在运行的 LGController（先用 `osascript` 请求退出，再 `pkill`）；
@@ -441,7 +441,7 @@ open /Applications/LGController.app
 | `.build/release/LGController --osdtest` | 在每个屏幕上依次演示浮层 | 亮度 5/16、音量 50%、静音，每屏约 2.7 秒；输出「HUD 演示 → <屏幕名> [id=N]」。不改变任何东西，不演示输入源浮层 |
 | `.build/release/LGController --uipreview` | 用示例数据离屏渲染弹窗 | 以 2× 写出 `/tmp/menu_preview_light.png` 和 `/tmp/menu_preview_dark.png`，每张输出「已渲染 light: …」或「渲染失败 (light)」（dark 同理） |
 
-- `.build/release/…` 命令需在 `./build.sh` 或 `swift build -c release` 之后，在仓库目录中运行。
+- `.build/release/…` 命令需在 `./build.sh` 或 `swift build -c release` 之后，在仓库目录中运行。`build.sh` 改用 `swiftc` 编译时，可执行文件在 `.build/swiftc/LGController`；也可以直接用 `/Applications/LGController.app/Contents/MacOS/LGController`。
 
 **`--login-item` 的输出**：「开机自启动：<状态>」，状态为以下之一：
 
@@ -481,6 +481,7 @@ open /Applications/LGController.app
 **构建时报错 `is using Swift tools version 5.7.0 but the installed version is …`，或 `no such module 'PackageDescription'`**
 
 - 原因：这台 Mac 的命令行工具太旧（Swift 低于 5.7，早于 Command Line Tools 14.1），或者装坏了——编译器和系统 SDK 版本对不上，常见于升级系统之后（此时报错前还会有一句 `did not find a prebuilt standard library … compatible with this Swift compiler`）。已经装过时，`xcode-select --install` 只会提示已安装，不会修复。
+- 用 `./build.sh` 构建时，`no such module 'PackageDescription'` 一般不用处理：脚本会自动改用 `swiftc` 直接编译（输出「SwiftPM 不可用（Package.swift 编译失败），改用 swiftc 直接编译」），第一次可能要几分钟。下面的修复只在报 tools version 太低、`swiftc` 也报错，或你要直接用 `swift build` 时才需要。
 - 解决：先用 `xcode-select -p` 看当前用的是哪套工具。如果是 `/Library/Developer/CommandLineTools`，删掉后重装，系统会装上适合这台 Mac 的最新版（需要输入密码）：
 
   ```bash
