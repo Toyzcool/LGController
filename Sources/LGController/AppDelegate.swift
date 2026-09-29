@@ -14,6 +14,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private(set) lazy var inputSwitcher = InputSwitcher(displayManager: displayManager)
     private var inputHotKeys: InputHotKeys?
     private let mediaKeyTap = MediaKeyTap()
+    /// Intel：亮度键以普通按键事件（键码 144/145）出现时的监听，见 BrightnessKeyDownTap。
+    private lazy var brightnessKeyDownTap = BrightnessKeyDownTap { [weak self] key, pressed, isRepeat, modifiers in
+        self?.router.handle(key: key, pressed: pressed, isRepeat: isRepeat, modifiers: modifiers) ?? false
+    }
+    /// 启动时还没有辅助功能权限。运行中途才拿到权限时，macOS 12 上新建的按键监听可能收不到事件，
+    /// 此时直接重启 App 最稳（新进程一启动就有权限）。
+    private var launchedWithoutAccessibility = false
     private var statusMenu: StatusMenuController?
     private var tapRetryTimer: Timer?
     private var reconfigureDebounce: DispatchWorkItem?
@@ -77,17 +84,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func requestAccessibilityAndStartTap() {
         let prompt = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as NSString
         let trusted = AXIsProcessTrustedWithOptions([prompt: true] as CFDictionary)
-        if trusted, mediaKeyTap.start() {
+        if trusted, startKeyTaps() {
             DiagLog.write("媒体键监听已启动（辅助功能已授权）")
             return
         }
+        launchedWithoutAccessibility = !trusted
         DiagLog.write(trusted ? "媒体键监听启动失败：已授权，但无法创建事件监听"
                               : "辅助功能未授权：亮度/音量/静音键交给 macOS 处理，每 3 秒重试")
         // 未授权：每 3 秒重试，授权一生效立即接管媒体键
         tapRetryTimer?.invalidate()
         tapRetryTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] timer in
             guard let self = self else { timer.invalidate(); return }
-            if AXIsProcessTrusted(), self.mediaKeyTap.start() {
+            guard AXIsProcessTrusted() else { return }
+            if self.launchedWithoutAccessibility {
+                timer.invalidate()
+                self.tapRetryTimer = nil
+                DiagLog.write("辅助功能权限已获得，重启 App 以接管按键")
+                self.relaunch()
+                return
+            }
+            if self.startKeyTaps() {
                 timer.invalidate()
                 self.tapRetryTimer = nil
                 NSLog("LGController: 辅助功能权限已获得")
@@ -123,6 +139,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func screensDidWake() {
         scheduleRebuild()
+    }
+
+    /// 启动按键监听：系统媒体键；Intel 上另加「普通按键形式」的亮度键（键码 144/145）。
+    private func startKeyTaps() -> Bool {
+        guard mediaKeyTap.start() else { return false }
+        #if arch(x86_64)
+        if brightnessKeyDownTap.start() {
+            DiagLog.write("亮度键（按键事件 键码 144/145）监听已启动")
+        }
+        #endif
+        return true
+    }
+
+    /// 等本进程退出后重新打开 App（避免新旧两个进程同时注册快捷键），然后退出本进程。
+    /// 不是从 .app 包里运行（如 .build/release 直接跑）时不重启。
+    private func relaunch() {
+        let bundleURL = Bundle.main.bundleURL
+        guard bundleURL.pathExtension == "app" else { return }
+        let waiter = Process()
+        waiter.executableURL = URL(fileURLWithPath: "/bin/sh")
+        waiter.arguments = ["-c", "while kill -0 \"$1\" 2>/dev/null; do sleep 0.2; done; exec /usr/bin/open \"$2\"",
+                            "sh", String(ProcessInfo.processInfo.processIdentifier), bundleURL.path]
+        do {
+            try waiter.run()
+            NSApp.terminate(nil)
+        } catch {
+            DiagLog.write("重启失败：\(error.localizedDescription)，请手动退出后重新打开 LGController")
+        }
     }
 
     func applicationWillTerminate(_: Notification) {

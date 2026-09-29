@@ -37,6 +37,7 @@ LGController is a macOS menu-bar app for controlling your displays and sound fro
 - **Channel.** The built-in display, and any display whose brightness DisplayServices can read (Studio Display, Thunderbolt UltraFine and similar), are controlled through DisplayServices. All other external displays use DDC/CI. For DDC displays the app uses the maximum the monitor reports, or 100 if it reports nothing.
 - **Step size.** Brightness is divided into 16 steps. Each press moves to the next 1/16 step line: up goes to the next line strictly above the current value, down to the previous line strictly below it. A value that sits between lines (for example one read from the monitor) snaps to the neighbouring line first, so a few presses from any value always land exactly on 0% or 100%. Examples: 21% down → 3/16 (18.75%), 21% up → 4/16 (25%), 25% up → 31.25%, 3% down → 0%, 97% up → 100%.
 - **Fine step.** Hold ⌥⇧ while pressing a brightness key to move 1/64 instead of 1/16.
+- **Brightness keys on Intel Macs.** Some keyboards (for example an Apple keyboard on an Intel Mac) send the brightness keys as ordinary key events (key codes 144 / 145) instead of system media-key events. The Intel build therefore also listens for key-down events: every key press passes through this listener, but it only acts on those two key codes and hands every other key straight back to macOS, without recording or storing anything. The Apple Silicon build doesn't listen to ordinary keys.
 - **Smooth changes.** Brightness from the keys or the sliders fades to the target at about 60 Hz (exponential approach) instead of jumping. On a slow DDC link the fade runs as fast as the monitor accepts writes.
 - **Displays that can't be controlled.** If the display under the pointer has no working channel (no DDC channel was matched, or DisplayServices isn't available), the key is passed to macOS unchanged, and the display's card shows 「亮度不可控」 (Brightness not controllable).
 - **Apple displays.** For built-in and Apple displays, the app re-reads the real brightness just before each key step and when the popover opens, unless the app itself changed it in the last 3 s. This picks up changes from auto-brightness or macOS's own controls.
@@ -331,7 +332,7 @@ Finally, open System Settings → Privacy & Security → Accessibility and turn 
 1. Start the app: `open /Applications/LGController.app`. A sun icon appears in the menu bar. There is no Dock icon.
 2. macOS asks whether LGController may control your computer using accessibility features. Choose to open System Settings.
 3. In System Settings → Privacy & Security → Accessibility, turn on **LGController**. If it isn't listed, click **+** and choose `/Applications/LGController.app`.
-4. You don't need to restart the app. While permission is missing, it checks again every 3 s and takes over the keys as soon as permission is granted.
+4. While permission is missing, the app checks again every 3 s. Once permission is granted it restarts itself once and then takes over the keys: on macOS 12, a key listener created after permission was granted mid-run may receive no events until the app restarts.
 5. To check, put the pointer on your LG and press Brightness Up (F2). A HUD should appear in the top-right corner of that screen.
 
 If you dismissed the prompt, open the popover and click the orange 「启用键盘快捷键需授予辅助功能权限…」 (Keyboard shortcuts require Accessibility permission…) warning. It asks again and opens the right settings pane. The popover checks the permission each time it opens, and the warning disappears once it's granted.
@@ -563,6 +564,8 @@ What changes:
 | Message | Meaning |
 |---|---|
 | `媒体键监听已启动（辅助功能已授权）` / `辅助功能未授权：…` | The media-key listener's state at launch; when Accessibility isn't granted, the brightness, volume and mute keys all go to macOS |
+| `亮度键（按键事件 键码 144/145）监听已启动` | Intel only: the listener for brightness keys that arrive as ordinary key events has started |
+| `辅助功能权限已获得，重启 App 以接管按键` | The app was launched without permission and got it mid-run, so it restarts itself once |
 | `媒体键 <key> 鼠标所在屏=「<name>」 → 已处理` / `交还 macOS` | One line per press of a brightness, volume or mute key: which key, which display handled it, and for brightness keys the resulting brightness. If you pressed a key and no line appears, the key never reached the app |
 | `系统按键 类型码=N（不是亮度/音量/静音，放行）` / `系统事件 subtype=N …` | A system key event arrived but it isn't one the app handles (for example keyboard backlight or play), so it goes to macOS unchanged. At most 50 per launch. If pressing an external keyboard's brightness key produces neither this line nor a 「媒体键」 line, that key doesn't send a system media-key event (typically because the vendor's software handles the key itself, or the keyboard sends brightness as an ordinary key such as F14/F15) |
 | `DDC 通道 <name>[id] → IOAVService` / `IOFramebuffer I²C` / `未匹配…` | At launch and after every display change: which channel controls this external monitor (Apple Silicon / Intel), or that none was found |

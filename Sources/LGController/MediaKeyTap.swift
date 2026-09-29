@@ -105,3 +105,81 @@ final class MediaKeyTap {
         DiagLog.write(message)
     }
 }
+
+// MARK: - 亮度键的「普通按键」形式（Intel Mac）
+
+/// 部分 Mac / 键盘（实测：Apple 键盘接在 2016 款 Intel MacBook Pro 上）的亮度键不发系统媒体键事件，
+/// 而是发普通按键按下事件，键码 144（亮度+）/ 145（亮度−）——MonitorControl 的 MediaKeyTap 也是这样处理的。
+/// 要收到它们只能监听按键按下（NX_KEYDOWN），这意味着每一次按键都会经过这里：
+/// 回调只看键码，不是这两个就立即原样放行，不记录、不保存任何按键内容。
+/// 监听放在独立线程的 run loop 上，主线程忙时也不会拖慢系统打字。
+final class BrightnessKeyDownTap {
+    typealias Handler = (MediaKey, _ pressed: Bool, _ isRepeat: Bool, _ modifiers: NSEvent.ModifierFlags) -> Bool
+
+    private let handler: Handler
+    private var eventTap: CFMachPort?
+
+    init(handler: @escaping Handler) {
+        self.handler = handler
+    }
+
+    @discardableResult
+    func start() -> Bool {
+        guard eventTap == nil else { return true }
+        let mask = CGEventMask(1 << CGEventType.keyDown.rawValue)
+        let callback: CGEventTapCallBack = { _, type, event, refcon in
+            guard let refcon = refcon else { return Unmanaged.passUnretained(event) }
+            let tap = Unmanaged<BrightnessKeyDownTap>.fromOpaque(refcon).takeUnretainedValue()
+            return tap.handle(type: type, event: event)
+        }
+        guard let tap = CGEvent.tapCreate(tap: .cgSessionEventTap,
+                                          place: .headInsertEventTap,
+                                          options: .defaultTap,
+                                          eventsOfInterest: mask,
+                                          callback: callback,
+                                          userInfo: Unmanaged.passUnretained(self).toOpaque())
+        else {
+            return false
+        }
+        eventTap = tap
+        let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+        let thread = Thread {
+            CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
+            CGEvent.tapEnable(tap: tap, enable: true)
+            CFRunLoopRun()
+        }
+        thread.name = "LGController.brightnessKeys"
+        thread.qualityOfService = .userInteractive
+        thread.start()
+        return true
+    }
+
+    /// 在监听线程上运行：只做键码判断，真正的调节交回主线程。
+    private func handle(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
+        if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+            if let tap = eventTap { CGEvent.tapEnable(tap: tap, enable: true) }
+            return Unmanaged.passUnretained(event)
+        }
+        guard type == .keyDown else { return Unmanaged.passUnretained(event) }
+        let key: MediaKey
+        switch event.getIntegerValueField(.keyboardEventKeycode) {
+        case 144: key = .brightnessUp
+        case 145: key = .brightnessDown
+        default: return Unmanaged.passUnretained(event) // 其余按键：原样放行，不看内容、不记录
+        }
+        var modifiers: NSEvent.ModifierFlags = []
+        let flags = event.flags
+        if flags.contains(.maskCommand) { modifiers.insert(.command) }
+        if flags.contains(.maskControl) { modifiers.insert(.control) }
+        if flags.contains(.maskAlternate) { modifiers.insert(.option) }
+        if flags.contains(.maskShift) { modifiers.insert(.shift) }
+        // 与 KeyRouter 的规则一致：⌘/⌃/单独 ⌥ 的组合交给系统
+        guard modifiers.isEmpty || modifiers == [.shift] || modifiers == [.option, .shift] else {
+            return Unmanaged.passUnretained(event)
+        }
+        let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
+        let handler = self.handler
+        DispatchQueue.main.async { _ = handler(key, true, isRepeat, modifiers) }
+        return nil
+    }
+}
