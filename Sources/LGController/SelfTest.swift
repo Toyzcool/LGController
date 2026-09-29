@@ -124,7 +124,14 @@ func runSelfTest() -> Never {
         pumpRunLoop(seconds: 1.0)
 
         if let ddcDisplay = display as? DDCDisplay {
-            if let (current, maxValue) = ddcDisplay.debugOnQueue({ $0.read(.brightness) }) ?? nil {
+            // 慢通道（如 Intel 的帧缓冲 I²C）渐变更久：最多再等 3 秒，每 0.5 秒读一次，读到目标即通过
+            var reading = ddcDisplay.debugOnQueue({ $0.read(.brightness) }) ?? nil
+            for _ in 0 ..< 6 {
+                if let r = reading, r.max > 0, abs(Float(r.current) / Float(r.max) - target) <= 0.02 { break }
+                pumpRunLoop(seconds: 0.5)
+                reading = ddcDisplay.debugOnQueue({ $0.read(.brightness) }) ?? reading
+            }
+            if let (current, maxValue) = reading {
                 let hw = Float(current) / Float(maxValue)
                 let ok = abs(hw - target) <= 0.02
                 print("   DDC 回读: \(current)/\(maxValue) (=\(String(format: "%.3f", hw))) 期望 \(String(format: "%.3f", target)) → \(ok ? "✅" : "❌")")
@@ -174,6 +181,7 @@ func runSelfTest() -> Never {
         // 音量读不到时按保存的状态写回（不能留在临时的 30）
         if let v = origVol ?? savedVol { write(.volume, v) }
         write(.mute, orig ?? (hasSaved && dd.muted ? 1 : 2))          // 还原（都读不到则默认未静音）
+        dd.debugForgetWrittenMute() // 上面绕过 DDCDisplay 直接写了 0x8D，别让它按过期缓存跳过下一次静音写入
         let ok = m1 == 1 && m2 == 2
         print("DDC 硬件静音 0x8D[\(display.name)]: 写1读=\(m1.map(String.init) ?? "nil") 写2读=\(m2.map(String.init) ?? "nil") \(ok ? "✅" : "❌")")
         if !ok { failures += 1 }
@@ -195,15 +203,30 @@ func runSelfTest() -> Never {
 
         /// 等异步写入落地后回读硬件（音量, 静音）。
         /// 必须走 debugReadHardwareVolume（显示器自己的串行队列），否则读会与队列上的写抢 I2C 总线、读到落后值。
-        func hw() -> (vol: Int, mute: Int) {
+        /// 慢通道（如 Intel 的帧缓冲 I²C）写入落地更慢：给了期望值时，最多再等 2.4 秒、每 0.4 秒读一次，
+        /// 读到期望值即返回（该屏确认不可回读后就不再等）。
+        var canReadBack = true
+        func readHardwareNow() -> (vol: Int, mute: Int) {
+            guard let reading = dd.debugReadHardwareVolume() else { return (9999, 9999) }
+            return (reading.volume, reading.mute)
+        }
+        func hw(vol expectedVol: Int? = nil, mute expectedMute: Int? = nil) -> (vol: Int, mute: Int) {
             pumpRunLoop(seconds: 0.6) // 等写入落地 + 显示器沉降（LG 刚写完立刻读会报旧值）
-            return dd.debugReadHardwareVolume() ?? (9999, 9999)
+            var last = readHardwareNow()
+            guard canReadBack, let wantVol = expectedVol else { return last }
+            for _ in 0 ..< 6 {
+                if last.vol == wantVol, expectedMute == nil || last.mute == expectedMute { break }
+                pumpRunLoop(seconds: 0.4)
+                last = readHardwareNow()
+            }
+            return last
         }
         // 起点：音量 5、未静音。先判断该屏的音量能否回读：有的显示器（如 LG HDR 4K）对 0x62 读请求
         // 只回 DDC 空消息，此时无法做硬件回读验证——只校验状态机逻辑，并如实标注，而不是误报失败。
         dd.setVolume(5 * unit)
-        var s = hw()
+        var s = hw(vol: 5, mute: 2)
         let readBack = s.vol != 9999
+        canReadBack = readBack
         if !readBack {
             print("   ⚠️ 该屏音量 VCP(0x62) 不可回读（读请求只得到空消息）：以下只校验状态机逻辑，未做硬件回读验证")
         }
@@ -219,20 +242,20 @@ func runSelfTest() -> Never {
 
         // 需求①：静音 → 状态音量归 0，硬件 0x8D=1
         let didMute = dd.toggleMute()
-        s = hw()
+        s = hw(vol: 0, mute: 1)
         check("静音后 状态muted=\(didMute) 状态音量=\(Int((dd.volume * 100).rounded())) 硬件 vol=\(s.vol) mute=\(s.mute)",
               logic: didMute && dd.volume == 0, hardware: s.vol == 0 && s.mute == 1)
 
         // 需求②：静音态按 + → 解除静音且恰好为 1（不跳到 6/旧值）
         let after = dd.stepVolume(up: true, fine: false)
-        s = hw()
+        s = hw(vol: 1, mute: 2)
         check("静音态 +1 → 状态音量=\(Int((after * 100).rounded())) muted=\(dd.muted) 硬件 vol=\(s.vol) mute=\(s.mute)",
               logic: abs(after - unit) < 0.0001 && !dd.muted, hardware: s.vol == 1 && s.mute == 2)
 
         // 步长恒为 1：连加 2 次 → 3
         dd.stepVolume(up: true, fine: false)
         let three = dd.stepVolume(up: true, fine: false)
-        s = hw()
+        s = hw(vol: 3)
         check("再 +1 +1 → 状态音量=\(Int((three * 100).rounded())) 硬件 vol=\(s.vol)",
               logic: abs(three - 3 * unit) < 0.0001, hardware: s.vol == 3)
 
@@ -242,14 +265,14 @@ func runSelfTest() -> Never {
         dd.stepVolume(up: false, fine: false)
         let one = dd.volume
         let zero = dd.stepVolume(up: false, fine: false)
-        s = hw()
+        s = hw(vol: 0, mute: 1)
         check("逐级 -1: 2=\(Int((two * 100).rounded())) 1=\(Int((one * 100).rounded())) 0=\(Int((zero * 100).rounded())) muted=\(dd.muted) 硬件 vol=\(s.vol) mute=\(s.mute)",
               logic: abs(two - 2 * unit) < 0.0001 && abs(one - unit) < 0.0001 && zero == 0 && dd.muted,
               hardware: s.vol == 0 && s.mute == 1)
 
         // 从 0 再 +1 → 1 并解除静音
         let backUp = dd.stepVolume(up: true, fine: false)
-        s = hw()
+        s = hw(vol: 1, mute: 2)
         check("0 再 +1 → 状态音量=\(Int((backUp * 100).rounded())) muted=\(dd.muted) 硬件 vol=\(s.vol) mute=\(s.mute)",
               logic: abs(backUp - unit) < 0.0001 && !dd.muted, hardware: s.vol == 1 && s.mute == 2)
 

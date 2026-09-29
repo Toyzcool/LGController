@@ -28,6 +28,14 @@ final class DDCService {
     private let transport: Transport
     /// 最近一次 I²C 事务结束的单调时钟（ns）。只在该显示器的串行队列上读写。
     private(set) var lastActivityNS: UInt64 = 0
+    /// Intel：最近一次读成功所用的 I²C 总线（读应答校验通过 = 确认是这台显示器的总线），之后优先用它。
+    private var framebufferBus: IOOptionBits?
+    /// Intel：写失败次数（诊断日志限频用）。
+    private var framebufferWriteFailures = 0
+
+    /// Intel：相邻两次 I²C 事务至少间隔这么久。DDC/CI 规定 ≥50ms；Intel 的 I²C 引擎不像 Apple Silicon
+    /// 那样替我们排队、重试，发得太密显示器会直接丢掉命令（实测 LG ULTRAFINE：音量/解除静音偶尔不落地），故取 100ms。
+    private static let framebufferMinGapMS: Double = 100
 
     init(service: CFTypeRef) {
         transport = .avService(service)
@@ -57,6 +65,15 @@ final class DDCService {
 
     private func touch() { lastActivityNS = DispatchTime.now().uptimeNanoseconds }
 
+    /// Intel：等到距上一次 I²C 事务至少 framebufferMinGapMS。
+    private func waitForFramebufferGap() {
+        guard isFramebuffer else { return }
+        let idle = idleMS
+        if idle < Self.framebufferMinGapMS {
+            usleep(UInt32((Self.framebufferMinGapMS - idle) * 1000))
+        }
+    }
+
     /// 距上一次 I²C 事务已过去的毫秒数（从未通信过 = 很大）。
     var idleMS: Double {
         lastActivityNS == 0 ? .infinity : Double(DispatchTime.now().uptimeNanoseconds - lastActivityNS) / 1_000_000
@@ -80,7 +97,16 @@ final class DDCService {
                 writeFn(service, 0x37, UInt32(dataAddress), $0.baseAddress!, count)
             }
         case .framebuffer(let framebuffer):
-            return IntelI2C.write(Self.framebufferPacket(packet, dataAddress: dataAddress), to: framebuffer)
+            let result = IntelI2C.write(Self.framebufferPacket(packet, dataAddress: dataAddress),
+                                        to: framebuffer, preferredBus: framebufferBus)
+            if result != kIOReturnSuccess {
+                framebufferWriteFailures += 1
+                if framebufferWriteFailures <= 5 || framebufferWriteFailures % 50 == 0 {
+                    DiagLog.write("Intel I²C 写失败（第 \(framebufferWriteFailures) 次）码=0x\(String(packet[2], radix: 16)) "
+                                  + "总线=\(framebufferBus.map { String($0) } ?? "未确定")")
+                }
+            }
+            return result
         }
     }
 
@@ -95,7 +121,9 @@ final class DDCService {
         defer { touch() }
         switch transport {
         case .avService(let service): return Self.readViaAVService(service, vcp)
-        case .framebuffer(let framebuffer): return Self.readViaFramebuffer(framebuffer, vcp)
+        case .framebuffer(let framebuffer):
+            waitForFramebufferGap()
+            return readViaFramebuffer(framebuffer, vcp)
         }
     }
 
@@ -126,17 +154,21 @@ final class DDCService {
         return nil
     }
 
-    private static func readViaFramebuffer(_ framebuffer: io_service_t, _ vcp: VCP) -> (current: UInt16, max: UInt16)? {
+    private func readViaFramebuffer(_ framebuffer: io_service_t, _ vcp: VCP) -> (current: UInt16, max: UInt16)? {
         // 读请求 [源地址 0x51, 0x82, 0x01, VCP, 校验]，校验 = 0x6E ^ 前 4 字节（与 MonitorControl IntelDDC 相同）
         var request: [UInt8] = [0x51, 0x82, 0x01, vcp.rawValue, 0]
-        request[4] = checksum(seed: 0x6E, data: request, from: 0, to: 3)
+        request[4] = Self.checksum(seed: 0x6E, data: request, from: 0, to: 3)
         for attempt in 0 ..< 3 {
             usleep(10000)
-            if let reply = IntelI2C.read(request, replyCount: 11, from: framebuffer),
-               let value = parseReply(reply, vcp: vcp) {
+            if let (reply, bus) = IntelI2C.read(request, replyCount: 11, from: framebuffer, preferredBus: framebufferBus),
+               let value = Self.parseReply(reply, vcp: vcp) {
+                if framebufferBus != bus {
+                    framebufferBus = bus
+                    DiagLog.write("Intel I²C 读应答校验通过，锁定总线 \(bus)")
+                }
                 return value
             }
-            if attempt < 2 { usleep(20000) }
+            if attempt < 2 { usleep(UInt32(Self.framebufferMinGapMS * 1000)) }
         }
         return nil
     }
@@ -184,6 +216,7 @@ final class DDCService {
         let copies = isFramebuffer ? 1 : 2
         var results: [IOReturn] = []
         defer { touch() }
+        waitForFramebufferGap()
         for _ in 0 ..< copies {
             usleep(10000)
             let ret = send(packet, dataAddress: dataAddress)
@@ -199,6 +232,16 @@ final class DDCService {
     func writeRaw(code: UInt8, value: UInt16, dataAddress: UInt8) -> Bool {
         let packet = Self.writePacket(code: code, value: value, dataAddress: dataAddress)
         defer { touch() }
+        if isFramebuffer {
+            // Intel：照 MonitorControl 的默认写两遍（各等 10ms），任一遍被确认即算成功——显示器偶尔会丢掉单条命令
+            waitForFramebufferGap()
+            var delivered = false
+            for _ in 0 ..< 2 {
+                usleep(10000)
+                if send(packet, dataAddress: dataAddress) == 0 { delivered = true }
+            }
+            return delivered
+        }
         for attempt in 0 ..< 2 {
             usleep(4000)
             if send(packet, dataAddress: dataAddress) == 0 { return true }
@@ -237,9 +280,10 @@ enum IntelI2C {
     }()
 
     /// 写：data 是完整 DDC/CI 包，首字节为源地址（0x51 标准 / 0x50 LG 输入源）。返回 IOReturn。
-    static func write(_ data: [UInt8], to framebuffer: io_service_t) -> IOReturn {
+    /// preferredBus 已确认时只发到那条总线：写没有应答，发到别的总线「成功」了也可能根本没到这台显示器。
+    static func write(_ data: [UInt8], to framebuffer: io_service_t, preferredBus: IOOptionBits?) -> IOReturn {
         var bytes = data
-        let ok = bytes.withUnsafeMutableBufferPointer { buffer -> Bool in
+        let bus = bytes.withUnsafeMutableBufferPointer { buffer -> IOOptionBits? in
             var request = IOI2CRequest()
             request.commFlags = 0
             request.sendAddress = 0x6E
@@ -248,18 +292,19 @@ enum IntelI2C {
             request.sendBytes = UInt32(buffer.count)
             request.replyTransactionType = IOOptionBits(kIOI2CNoTransactionType)
             request.replyBytes = 0
-            return send(&request, to: framebuffer)
+            return send(&request, to: framebuffer, preferredBus: preferredBus, onlyPreferred: preferredBus != nil)
         }
-        return ok ? kIOReturnSuccess : kIOReturnError
+        return bus != nil ? kIOReturnSuccess : kIOReturnError
     }
 
-    /// 读：发送读请求包（首字节为源地址 0x51），取 replyCount 字节应答；失败返回 nil。
-    static func read(_ data: [UInt8], replyCount: Int, from framebuffer: io_service_t) -> [UInt8]? {
+    /// 读：发送读请求包（首字节为源地址 0x51），取 replyCount 字节应答和所用总线；失败返回 nil。
+    static func read(_ data: [UInt8], replyCount: Int, from framebuffer: io_service_t,
+                     preferredBus: IOOptionBits?) -> (reply: [UInt8], bus: IOOptionBits)? {
         guard let replyType = replyTransactionType else { return nil }
         var sendBytes = data
         var reply = [UInt8](repeating: 0, count: replyCount)
-        let ok = sendBytes.withUnsafeMutableBufferPointer { sendBuffer -> Bool in
-            reply.withUnsafeMutableBufferPointer { replyBuffer -> Bool in
+        let bus = sendBytes.withUnsafeMutableBufferPointer { sendBuffer -> IOOptionBits? in
+            reply.withUnsafeMutableBufferPointer { replyBuffer -> IOOptionBits? in
                 var request = IOI2CRequest()
                 request.commFlags = 0
                 request.sendAddress = 0x6E
@@ -272,17 +317,24 @@ enum IntelI2C {
                 request.replyTransactionType = replyType
                 request.replyBuffer = vm_address_t(bitPattern: replyBuffer.baseAddress)
                 request.replyBytes = UInt32(replyBuffer.count)
-                return send(&request, to: framebuffer)
+                return send(&request, to: framebuffer, preferredBus: preferredBus, onlyPreferred: false)
             }
         }
-        return ok ? reply : nil
+        guard let usedBus = bus else { return nil }
+        return (reply, usedBus)
     }
 
-    /// 逐条 I²C 总线尝试发送一个请求，直到有一条成功。
-    private static func send(_ request: inout IOI2CRequest, to framebuffer: io_service_t) -> Bool {
+    /// 发送一个 I²C 请求：先试 preferredBus，再按顺序试其余总线（onlyPreferred 时只试 preferredBus），
+    /// 返回成功的那条总线。
+    private static func send(_ request: inout IOI2CRequest, to framebuffer: io_service_t,
+                             preferredBus: IOOptionBits?, onlyPreferred: Bool) -> IOOptionBits? {
         var busCount: IOItemCount = 0
-        guard IOFBGetI2CInterfaceCount(framebuffer, &busCount) == KERN_SUCCESS else { return false }
-        for bus in 0 ..< busCount {
+        guard IOFBGetI2CInterfaceCount(framebuffer, &busCount) == KERN_SUCCESS else { return nil }
+        var order: [IOOptionBits] = Array(0 ..< busCount)
+        if let preferred = preferredBus, preferred < busCount {
+            order = onlyPreferred ? [preferred] : [preferred] + order.filter { $0 != preferred }
+        }
+        for bus in order {
             var interface: io_service_t = 0
             guard IOFBCopyI2CInterfaceForBus(framebuffer, bus, &interface) == KERN_SUCCESS else { continue }
             defer { IOObjectRelease(interface) }
@@ -290,10 +342,10 @@ enum IntelI2C {
             guard IOI2CInterfaceOpen(interface, 0, &connect) == KERN_SUCCESS, let connection = connect else { continue }
             defer { IOI2CInterfaceClose(connection, 0) }
             if IOI2CSendRequest(connection, 0, &request) == KERN_SUCCESS, request.result == KERN_SUCCESS {
-                return true
+                return bus
             }
         }
-        return false
+        return nil
     }
 
     /// CGDirectDisplayID → IOFramebuffer 端口（返回的端口由调用方持有，用完须 IOObjectRelease；交给 DDCService 即可）。
@@ -305,23 +357,27 @@ enum IntelI2C {
             lookup(displayID, &port)
             if port != 0 {
                 if hasI2CBus(port) {
-                    DiagLog.write("Intel 帧缓冲 显示器\(displayID) → CGSServiceForDisplayNumber")
+                    DiagLog.write("Intel 帧缓冲 显示器\(displayID) → CGSServiceForDisplayNumber，I²C 总线 \(busCount(port)) 条")
                     return port
                 }
                 IOObjectRelease(port)
             }
         }
         if let port = framebufferMatchingProperties(of: displayID) {
-            DiagLog.write("Intel 帧缓冲 显示器\(displayID) → EDID 属性匹配")
+            DiagLog.write("Intel 帧缓冲 显示器\(displayID) → EDID 属性匹配，I²C 总线 \(busCount(port)) 条")
             return port
         }
         DiagLog.write("Intel 帧缓冲 显示器\(displayID) → 未找到带 I²C 总线的 IOFramebuffer")
         return nil
     }
 
+    private static func busCount(_ framebuffer: io_service_t) -> IOItemCount {
+        var count: IOItemCount = 0
+        return IOFBGetI2CInterfaceCount(framebuffer, &count) == KERN_SUCCESS ? count : 0
+    }
+
     private static func hasI2CBus(_ framebuffer: io_service_t) -> Bool {
-        var busCount: IOItemCount = 0
-        return IOFBGetI2CInterfaceCount(framebuffer, &busCount) == KERN_SUCCESS && busCount > 0
+        busCount(framebuffer) > 0
     }
 
     private static func framebufferMatchingProperties(of displayID: CGDirectDisplayID) -> io_service_t? {

@@ -469,6 +469,12 @@ final class DDCDisplay: Display {
     /// 自检专用：在该显示器的串行队列上回读硬件音量/静音。
     /// 用 queue.sync 保证排在所有已排队的写入之后，避免测试从主线程直接读时与写入抢同一条 I2C 总线。
     /// 会阻塞调用线程数百毫秒，正常运行路径不要调用。
+    /// 自检专用：自检绕过本对象直接写过 0x8D 后调用——忘掉「上次写入的静音态」，
+    /// 下一次写音量时就会显式写 0x8D，而不是按过期的缓存跳过。
+    func debugForgetWrittenMute() {
+        queue.sync { lastWrittenMute = nil }
+    }
+
     func debugReadHardwareVolume() -> (volume: Int, mute: Int)? {
         guard let ddc = ddc else { return nil }
         return queue.sync {
