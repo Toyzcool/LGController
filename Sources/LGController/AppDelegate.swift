@@ -78,8 +78,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let prompt = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as NSString
         let trusted = AXIsProcessTrustedWithOptions([prompt: true] as CFDictionary)
         if trusted, mediaKeyTap.start() {
+            DiagLog.write("媒体键监听已启动（辅助功能已授权）")
             return
         }
+        DiagLog.write(trusted ? "媒体键监听启动失败：已授权，但无法创建事件监听"
+                              : "辅助功能未授权：亮度/音量/静音键交给 macOS 处理，每 3 秒重试")
         // 未授权：每 3 秒重试，授权一生效立即接管媒体键
         tapRetryTimer?.invalidate()
         tapRetryTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] timer in
@@ -88,6 +91,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 timer.invalidate()
                 self.tapRetryTimer = nil
                 NSLog("LGController: 辅助功能权限已获得")
+                DiagLog.write("辅助功能权限已获得，媒体键监听已启动")
             }
         }
     }

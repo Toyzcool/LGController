@@ -68,6 +68,7 @@ final class MediaKeyTap {
         // 系统在回调过慢/用户干预时会禁用 tap，这里自动恢复
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             if let tap = eventTap { CGEvent.tapEnable(tap: tap, enable: true) }
+            DiagLog.write("媒体键监听被系统暂停（\(type == .tapDisabledByTimeout ? "回调超时" : "用户操作")），已重新启用")
             return Unmanaged.passUnretained(event)
         }
         guard type.rawValue == 14, // NX_SYSDEFINED

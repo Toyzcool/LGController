@@ -502,6 +502,7 @@ What changes:
 | The Accessibility switch is on, but macOS still handles the media keys | The app was rebuilt with ad-hoc signing, so the permission no longer applies; or the app was run from the project folder in iCloud Drive instead of `/Applications` | Remove LGController from the Accessibility list and add it again, or run `tccutil reset Accessibility com.toyzcool.LGController`, relaunch `/Applications/LGController.app` and grant again. To stop this happening on every rebuild, set up the self-signed certificate ([section 2](#2-build--install)) |
 | macOS handles the keys while the displays are asleep, or for a moment right after wake or plugging in a display | Key handling is paused while the displays are asleep, and for about 1.5 s after wake or a display change, until the app has reconnected to the monitors | Wait a moment and press again |
 | Only one display's brightness keys don't work, and its card shows 「亮度不可控」 (Brightness not controllable) | The app matched no DDC channel for that display (for example, on an Intel Mac no framebuffer I²C bus was found for it), or DisplayServices isn't available, so the brightness keys went to macOS | After plugging in or waking, wait for the rebuild to finish and try again, or move the pointer to a display that can be controlled. The `DDC 通道` line in the diagnostic log shows the match result |
+| On a Touch Bar Mac, adjusting brightness does nothing on the external display | Dragging the Touch Bar's brightness slider changes the built-in display directly and sends no key event, so the app can't intercept it | Tap « ‹ » on the Control Strip to expand it and use the separate brightness buttons, or use the sliders in the menu bar popover. If the diagnostic log has no matching 「媒体键」 line, the key never reached the app |
 | The app doesn't respond when a modifier is held | ⌘, ⌃ or ⌥ on its own is held; those combinations go to macOS unchanged | Use no modifier, ⇧, or ⌥⇧ |
 | The volume HUD shows a crossed-out speaker in a circle | The current output's volume can't be adjusted | See the next entry, "The Volume card says …" |
 | The keys behave differently from LGController (different steps or HUD), or LGController seems not to respond | An app you used before LGController (see [section 8](#8-migrating-from-monitoring--sourceshift)) or another media-key tool (such as MonitorControl) is still running and takes the keys first | Quit it and remove its login item, see [section 8](#8-migrating-from-monitoring--sourceshift) |
@@ -557,10 +558,12 @@ What changes:
   ```
 
 - Each line is `HH:mm:ss.SSS [thread/queue] message`. It has a time but no date, so note the time when you reproduce a problem.
-- It records input-source commands and DDC reads only. The 60 Hz brightness writes aren't logged; hotkey registration failures, media-key monitoring start-up and display reconfiguration go only to the system log (NSLog), not to this file.
+- It records input-source commands, DDC reads, the DDC channel used for each external display, the media-key listener's state (whether Accessibility is granted), and every press of a brightness, volume or mute key with its outcome. The 60 Hz brightness writes aren't logged; hotkey registration failures and display reconfiguration go only to the system log (NSLog), not to this file.
 
 | Message | Meaning |
 |---|---|
+| `媒体键监听已启动（辅助功能已授权）` / `辅助功能未授权：…` | The media-key listener's state at launch; when Accessibility isn't granted, the brightness, volume and mute keys all go to macOS |
+| `媒体键 <key> 鼠标所在屏=「<name>」 → 已处理` / `交还 macOS` | One line per press of a brightness, volume or mute key: which key, which display handled it, and for brightness keys the resulting brightness. If you pressed a key and no line appears, the key never reached the app |
 | `DDC 通道 <name>[id] → IOAVService` / `IOFramebuffer I²C` / `未匹配…` | At launch and after every display change: which channel controls this external monitor (Apple Silicon / Intel), or that none was found |
 | `Intel 帧缓冲 显示器N → …` | On an Intel Mac: how the monitor's framebuffer was found (CGSServiceForDisplayNumber or EDID property matching), or that none was found |
 | `输入源 请求 <input>（0x..） 路线=DDC屏「<name>」` | Request received; the command will go to monitor `<name>` |

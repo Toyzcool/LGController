@@ -19,7 +19,28 @@ final class KeyRouter {
     }
 
     /// MediaKeyTap 回调入口（主线程）。返回 true = 吞掉事件。
+    /// 每次按下（不含按住重复、松开）记一行诊断日志：按了什么键、鼠标在哪块屏、处理了还是交还 macOS。
     func handle(key: MediaKey, pressed: Bool, isRepeat: Bool, modifiers: NSEvent.ModifierFlags) -> Bool {
+        let consumed = route(key: key, pressed: pressed, isRepeat: isRepeat, modifiers: modifiers)
+        if pressed, !isRepeat {
+            let display = displayManager.displayUnderMouse()
+            var detail = ""
+            if consumed, key == .brightnessUp || key == .brightnessDown, let display = display {
+                detail = String(format: "，亮度 → %.3f", display.brightness)
+            }
+            var mods = ""
+            if modifiers.contains(.control) { mods += "⌃" }
+            if modifiers.contains(.option) { mods += "⌥" }
+            if modifiers.contains(.shift) { mods += "⇧" }
+            if modifiers.contains(.command) { mods += "⌘" }
+            let screen = display.map { "「\($0.name)」" } ?? "无"
+            let outcome = consumed ? "已处理" : (suspended ? "交还 macOS（显示器重新配置中，暂停）" : "交还 macOS")
+            DiagLog.write("媒体键 \(mods)\(key) 鼠标所在屏=\(screen) → \(outcome)\(detail)")
+        }
+        return consumed
+    }
+
+    private func route(key: MediaKey, pressed: Bool, isRepeat: Bool, modifiers: NSEvent.ModifierFlags) -> Bool {
         guard !suspended else { return false }
 
         // ⌘/⌃/单独⌥ 等组合键一律放行（保留系统行为，如 ⌥+亮度键打开设置）
