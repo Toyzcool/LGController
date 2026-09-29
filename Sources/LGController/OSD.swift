@@ -54,6 +54,7 @@ private final class HUD {
     static let shared = HUD()
 
     private let panelSize = NSSize(width: 230, height: 40)
+    private let cornerRadius: CGFloat = 14
     private let panel: NSPanel
     private let iconView = NSImageView()
     private let trackView = TrackView()
@@ -78,8 +79,11 @@ private final class HUD {
         effect.material = .hudWindow
         effect.blendingMode = .behindWindow
         effect.state = .active
+        // 圆角：「透出窗口背后」的磨砂只认 maskImage——旧系统（如 macOS 12）上图层圆角裁不到磨砂，
+        // 会露出方形的磨砂底和方形阴影；新系统两种都认。两者都设，各版本外观一致。
+        effect.maskImage = Self.roundedMask(radius: cornerRadius)
         effect.wantsLayer = true
-        effect.layer?.cornerRadius = 14
+        effect.layer?.cornerRadius = cornerRadius
         effect.layer?.cornerCurve = .continuous
         effect.layer?.masksToBounds = true
         panel.contentView = effect
@@ -137,6 +141,7 @@ private final class HUD {
         if !panel.isVisible {
             panel.alphaValue = 0
             panel.orderFrontRegardless()
+            panel.invalidateShadow() // 阴影按圆角遮罩后的形状重算（否则旧系统上是方形阴影）
         }
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = 0.12
@@ -155,6 +160,21 @@ private final class HUD {
         }
         hideWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: work)
+    }
+}
+
+extension HUD {
+    /// 可拉伸的圆角遮罩（四角固定、中间拉伸），用作 NSVisualEffectView.maskImage。
+    static func roundedMask(radius: CGFloat) -> NSImage {
+        let side = radius * 2 + 1
+        let image = NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
+            NSColor.black.setFill()
+            NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).fill()
+            return true
+        }
+        image.capInsets = NSEdgeInsets(top: radius, left: radius, bottom: radius, right: radius)
+        image.resizingMode = .stretch
+        return image
     }
 }
 
